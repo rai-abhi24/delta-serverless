@@ -2,6 +2,7 @@ const config = require('../config');
 const cache = require('../utils/cache');
 const { CACHE_KEYS } = require("./constants");
 const { queryOne } = require('../config/database');
+const { TABLES } = require('./tablesNames');
 
 /**
  * Get fantasy keys from database with caching
@@ -20,7 +21,7 @@ const getFantasyKey = async (key) => {
             cacheKey,
             async () => {
                 const result = await queryOne(
-                    'SELECT value FROM fantasy_keys WHERE `key` = ? LIMIT 1',
+                    `SELECT value FROM ${TABLES.FANTASY_KEYS} WHERE title = ? LIMIT 1`,
                     [key]
                 );
                 return result ? result.value : null;

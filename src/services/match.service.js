@@ -4,9 +4,10 @@
  */
 
 const cache = require('../utils/cache');
-const { logError } = require('../utils/logger');
+const { logError, logger } = require('../utils/logger');
 const { queryAll, queryOne } = require('../config/database');
-const { TABLES } = require('../utils/constants');
+const { TABLES } = require('../utils/tablesNames');
+const { getFantasyKey } = require('../utils/helper');
 
 /**
  * Check if mega contest is available for match
@@ -14,20 +15,30 @@ const { TABLES } = require('../utils/constants');
  * @returns {Promise<number>} Mega contest value
  */
 const isMegaContestAvailable = async (matchId) => {
-    try {
-        const result = await queryOne(`
-            SELECT event_name FROM create_contest 
-            WHERE match_id = ? 
-            AND is_mega_contest = 1 
-            AND is_cancelled = 0 
-            LIMIT 1
-        `, [matchId]
-        );
-        return result ? parseInt(result.event_name || 0) : 0;
-    } catch (error) {
-        logError(error, { context: 'isMegaContestAvailable', matchId });
-        return 0;
-    }
+    const cacheKey = `contest:mega:${matchId}`;
+
+    return await cache.cacheAside(
+        cacheKey,
+        async () => {
+            try {
+                const result = await queryOne(`
+                    SELECT SUM(total_winning_prize) as total_prize 
+                    FROM ${TABLES.CREATE_CONTESTS} 
+                    WHERE match_id = ? 
+                    AND contest_type IN ('1', '6', '14', '24', '10', '18', '17', '25', '21', '29')
+                    AND is_cancelled = 0`,
+                    [matchId]
+                );
+
+                const contestMega = parseInt(result?.total_prize || 0);
+                return contestMega > 100 ? contestMega : 0;
+            } catch (error) {
+                logError(error, { context: 'isMegaContestAvailable', matchId });
+                return 0;
+            }
+        },
+        1800 // 30 mins
+    );
 };
 
 /**
@@ -47,10 +58,11 @@ const getMatchesWithPlayers = async (page = 1, limit = 10) => {
             FROM ${TABLES.MATCHES} m
             INNER JOIN ${TABLES.MASTER_PLAYER} mp ON m.match_id = mp.match_id
             WHERE m.status IN (1, 3)
-            AND m.timestamp_start >= ?
+            AND m.timestamp_start >= '${currentTime}'
             AND m.is_cancelled = 0
         `;
 
+        logger.info(countQuery.replace(/\n/g, ' '));
         const [countResult] = await queryAll(countQuery, [currentTime]);
         const totalItems = countResult?.total || 0;
         const totalPages = Math.ceil(totalItems / limit);
@@ -90,13 +102,14 @@ const getMatchesWithPlayers = async (page = 1, limit = 10) => {
             LEFT JOIN ${TABLES.TEAM_A} ta ON m.match_id = ta.match_id
             LEFT JOIN ${TABLES.TEAM_B} tb ON m.match_id = tb.match_id
             WHERE m.status IN (1, 3)
-            AND m.timestamp_start >= ?
+            AND m.timestamp_start >= '${currentTime}'
             AND m.is_cancelled = 0
             ORDER BY m.is_free DESC, m.timestamp_start ASC
-            LIMIT ? OFFSET ?
+            LIMIT ${limit} OFFSET ${offset}
         `;
 
-        const matches = await queryAll(matchesQuery, [currentTime, limit, offset]);
+        logger.info(matchesQuery.replace(/\n/g, ' '));
+        const matches = await queryAll(matchesQuery);
 
         return {
             matches,
@@ -128,7 +141,7 @@ const getLeagueTitle = async (competitionId) => {
             cacheKey,
             async () => {
                 const result = await queryOne(
-                    'SELECT title FROM competitions WHERE cid = ? LIMIT 1',
+                    `SELECT title FROM ${TABLES.COMPETITIONS} WHERE cid = ? LIMIT 1`,
                     [competitionId]
                 );
                 return result?.title || null;
@@ -148,10 +161,12 @@ const getLeagueTitle = async (competitionId) => {
  */
 const getLineupCount = async (matchId) => {
     try {
-        const result = await queryOne(
-            `SELECT COUNT(*) as count FROM team_a_squads 
-       WHERE match_id = ? AND playing11 = 'true'`,
-            [matchId]
+        const result = await queryOne(`
+            SELECT COUNT(*) as count 
+            FROM ${TABLES.TEAM_A_SQUADS} 
+            WHERE match_id = ? 
+            AND playing11 = 'true'
+        `, [matchId]
         );
         return result?.count || 0;
     } catch (error) {
@@ -169,7 +184,7 @@ const getTotalGuruCount = async (matchId) => {
     try {
         // First get promoter IDs
         const promoters = await queryAll(
-            'SELECT user_id FROM promoters_list WHERE status = 2'
+            `SELECT user_id FROM ${TABLES.PROMOTERS_LIST} WHERE status = 2`
         );
 
         if (!promoters || promoters.length === 0) {
@@ -180,12 +195,12 @@ const getTotalGuruCount = async (matchId) => {
 
         // Count guru teams
         const placeholders = promoterIds.map(() => '?').join(',');
-        const result = await queryOne(
-            `SELECT COUNT(*) as count FROM create_team 
-       WHERE match_id = ? 
-       AND user_id IN (${placeholders}) 
-       AND team_count = 'T1'`,
-            [matchId, ...promoterIds]
+        const result = await queryOne(`
+            SELECT COUNT(*) as count FROM ${TABLES.CREATE_TEAMS} 
+            WHERE match_id = ? 
+            AND user_id IN (${placeholders}) 
+            AND team_count = 'T1'
+            `, [matchId, ...promoterIds]
         );
 
         return result?.count || 0;
@@ -203,7 +218,7 @@ const getTotalGuruCount = async (matchId) => {
 const getPlayerCount = async (matchId) => {
     try {
         const result = await queryOne(
-            'SELECT COUNT(*) as count FROM master_player WHERE match_id = ?',
+            `SELECT COUNT(*) as count FROM ${TABLES.MASTER_PLAYER} WHERE match_id = ?`,
             [matchId]
         );
         return result?.count || 0;
@@ -220,15 +235,15 @@ const getPlayerCount = async (matchId) => {
  */
 const getFreeContest = async (matchId) => {
     try {
-        const result = await queryOne(
-            `SELECT total_winning_prize FROM create_contest 
-       WHERE match_id = ? 
-       AND entry_fees = 0 
-       AND is_cancelled = 0 
-       AND total_winning_prize > 0 
-       AND is_private = 0 
-       LIMIT 1`,
-            [matchId]
+        const result = await queryOne(`
+            SELECT total_winning_prize FROM ${TABLES.CREATE_CONTESTS} 
+            WHERE match_id = ? 
+            AND entry_fees = 0 
+            AND is_cancelled = 0 
+            AND total_winning_prize > 0 
+            AND is_private = 0 
+            LIMIT 1
+       `, [matchId]
         );
         return result;
     } catch (error) {
@@ -398,7 +413,7 @@ const transformMatch = async (match) => {
 const getMatches = async (body, params) => {
     const { page = 1 } = params;
     const pageNum = parseInt(page) || 1;
-    const cacheKey = `getMatchCrickets_${pageNum}`;
+    const cacheKey = `matches:cricket:${pageNum}`;
 
     try {
         // Use cache-aside pattern
@@ -457,7 +472,7 @@ const getMatches = async (body, params) => {
 
                 return result;
             },
-            60
+            600
         );
     } catch (error) {
         logError(error, { context: 'getMatches', page: pageNum });

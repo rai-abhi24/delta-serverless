@@ -60,17 +60,4 @@ module.exports = {
         REDIS: 5000,
         HTTP: 10000,
     },
-
-    // DB Table names
-    TABLES: {
-        CONTEST_TYPES: 'contest_types',
-        FANTASY_KEYS: 'fantasy_keys',
-        MASTER_PLAYER: 'master_player',
-        MATCHES: 'matches',
-        PLAYERS: 'players',
-        TEAM_A: 'team_a',
-        TEAM_B: 'team_b',
-        USERS: 'users',
-    },
-
 };

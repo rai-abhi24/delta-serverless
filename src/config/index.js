@@ -51,10 +51,10 @@ const config = {
 
     // Cache TTL settings (in seconds)
     cache: {
-        apkUpdate: parseInt(process.env.CACHE_TTL_APK_UPDATE || '300', 10),
-        promotions: parseInt(process.env.CACHE_TTL_PROMOTIONS || '85000', 10),
-        adsSettings: parseInt(process.env.CACHE_TTL_ADS_SETTINGS || '85000', 10),
-        fantasyKeys: parseInt(process.env.CACHE_TTL_FANTASY_KEYS || '3600', 10),
+        apkUpdate: parseInt(process.env.CACHE_TTL_APK_UPDATE || 600, 10),
+        promotions: parseInt(process.env.CACHE_TTL_PROMOTIONS || 86400, 10),
+        adsSettings: parseInt(process.env.CACHE_TTL_ADS_SETTINGS || 86400, 10),
+        fantasyKeys: parseInt(process.env.CACHE_TTL_FANTASY_KEYS || 3600, 10),
     },
 
     // App configuration
