@@ -12,8 +12,10 @@ exports.apkUpdateHandler = async (request, reply) => {
         const { user_id, version_code, os_type } = request.body || {};
 
         if (user_id) {
-            userService.updateLastActive(user_id).catch(err => {
-                logger.warn({ userId: user_id, error: err.message }, 'Failed to update last active');
+            setImmediate(() => {
+                userService.updateLastActive(user_id).catch(err => {
+                    logger.warn({ userId: user_id, error: err.message });
+                });
             });
         }
 
