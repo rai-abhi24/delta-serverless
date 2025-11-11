@@ -19,11 +19,6 @@ const config = {
         user: process.env.DB_USER,
         password: process.env.DB_PASSWORD,
         connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
-        queueLimit: parseInt(process.env.DB_QUEUE_LIMIT || '0', 10),
-        connectTimeout: parseInt(process.env.DB_CONNECT_TIMEOUT || '10000', 10),
-        waitForConnections: true,
-        enableKeepAlive: true,
-        keepAliveInitialDelay: 10000,
     },
 
     // Redis configuration

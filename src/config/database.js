@@ -26,17 +26,41 @@ const getPool = async () => {
             database: config.database.database,
             user: config.database.user,
             password: config.database.password,
+
             connectionLimit: config.database.connectionLimit,
-            queueLimit: config.database.queueLimit,
-            connectTimeout: config.database.connectTimeout,
-            waitForConnections: config.database.waitForConnections,
-            enableKeepAlive: config.database.enableKeepAlive,
-            keepAliveInitialDelay: config.database.keepAliveInitialDelay,
-            timezone: config.database.timezone,
+            queueLimit: 10,
+
+            connectTimeout: 3000,
+            acquireTimeout: 3000,
+
+            waitForConnections: true,
+            enableKeepAlive: true,
+            keepAliveInitialDelay: 10_000,
+
+            maxIdle: 10,
+            idleTimeout: 60_000,
+
+            timezone: config.database.timezone || '+00:00',
             decimalNumbers: true,
             supportBigNumbers: true,
             dateStrings: false,
-            multipleStatements: false, // Security: prevent SQL injection
+            multipleStatements: false,
+
+            cache: true,
+            compress: true,
+            charset: 'utf8mb4_unicode_ci',
+        });
+
+        pool.on('acquire', () => {
+            logger.debug('Connection acquired from pool');
+        });
+
+        pool.on('release', () => {
+            logger.debug('Connection released back to pool');
+        });
+
+        pool.on('enqueue', () => {
+            logger.warn('Waiting for available connection slot');
         });
 
         // Test connection on initialization
@@ -140,12 +164,23 @@ const checkHealth = async () => {
     try {
         const dbPool = await getPool();
         const connection = await dbPool.getConnection();
+
         await connection.ping();
+
+        const poolStats = {
+            activeConnections: dbPool.pool._allConnections.length - dbPool.pool._freeConnections.length,
+            freeConnections: dbPool.pool._freeConnections.length,
+            totalConnections: dbPool.pool._allConnections.length,
+            queueLength: dbPool.pool._connectionQueue.length,
+        };
+
         connection.release();
-        return true;
+
+        logger.info('Database health check passed', poolStats);
+        return { healthy: true, stats: poolStats };
     } catch (error) {
         logError(error, { context: 'health_check' });
-        return false;
+        return { healthy: false, error: error.message };
     }
 };
 
