@@ -1,14 +1,16 @@
-const { apkUpdateHandler } = require('../../handlers/apkUpdate.handler');
+
+const schemas = require('../../schemas');
+const { bannerHandler } = require('../../handlers/banner.handler');
 const { getMatchHandler } = require('../../handlers/match.handler');
-const {
-    apkUpdateSchema,
-    getMatchSchema
-} = require('../../schemas');
+const { apkUpdateHandler } = require('../../handlers/apkUpdate.handler');
 
 module.exports = async (app) => {
     // APK update endpoint
-    app.post("/apkUpdate", { schema: apkUpdateSchema }, apkUpdateHandler);
+    app.post("/apkUpdate", { schema: schemas.apkUpdateSchema }, apkUpdateHandler);
+
+    // Banner endpoint
+    app.post("/getBanners", { schema: schemas.getBannersSchema }, bannerHandler);
 
     // Match endpoints
-    app.post("/getMatch", { schema: getMatchSchema }, getMatchHandler);
+    app.post("/getMatch", { schema: schemas.getMatchSchema }, getMatchHandler);
 };

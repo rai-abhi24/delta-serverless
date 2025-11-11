@@ -34,3 +34,17 @@ exports.getMatchSchema = {
         }
     }
 };
+
+exports.getBannersSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['user_id'],
+            properties: {
+                user_id: { type: 'string' },
+                device_id: { type: 'string' }
+            },
+            additionalProperties: false
+        },
+    },
+};

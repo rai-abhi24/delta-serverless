@@ -28,10 +28,8 @@ const getPool = async () => {
             password: config.database.password,
 
             connectionLimit: config.database.connectionLimit,
-            queueLimit: 10,
-
             connectTimeout: 3000,
-            acquireTimeout: 3000,
+            queueLimit: 10,
 
             waitForConnections: true,
             enableKeepAlive: true,
@@ -46,7 +44,6 @@ const getPool = async () => {
             dateStrings: false,
             multipleStatements: false,
 
-            cache: true,
             compress: true,
             charset: 'utf8mb4_unicode_ci',
         });

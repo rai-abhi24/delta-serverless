@@ -43,6 +43,11 @@ module.exports = {
         ADS_SETTINGS: 'adsSettings',
         FANTASY_KEYS: (key) => `fantasyKeys:${key}`,
         USER_LAST_ACTIVE: (userId) => `user:${userId}:lastActive`,
+
+        BANNER_CATALOG: () => `cat:bnr:glb:v1`,
+        USER_BANNER_FEED: (userId) => `feed:banner:usr:${userId}:v2`,
+        USER_MATCHES_AGGREGATE: (userId) => `agg:mtch:usr:${userId}:v1`,
+        MATCH_METADATA_BATCH: (matchIds) => `meta:mtch:batch:${matchIds.join('-')}:v1`,
     },
 
     // iOS app configuration
