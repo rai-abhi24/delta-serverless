@@ -6,9 +6,10 @@
 const fastify = require("fastify")
 const { v4: uuidv4 } = require('uuid');
 const { success, error } = require("./utils/response");
-const { default: fastifyHelmet } = require("@fastify/helmet");
-const { logRequest, logResponse, logger } = require("./utils/logger");
 const { default: fastifyCors } = require("@fastify/cors");
+const { default: fastifyHelmet } = require("@fastify/helmet");
+const { default: fastifyCompress } = require("@fastify/compress");
+const { logRequest, logResponse, logger } = require("./utils/logger");
 const awsLambdaFastify = require('@fastify/aws-lambda');
 const v1Routes = require("./routes/v1");
 
@@ -29,6 +30,12 @@ app.register(fastifyCors, {
 
 app.register(fastifyHelmet, {
     contentSecurityPolicy: false,
+});
+
+app.register(fastifyCompress, {
+    global: true,
+    threshold: 1024,
+    encodings: ['gzip', 'deflate'],
 });
 
 app.addHook('onRequest', async (request) => {

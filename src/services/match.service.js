@@ -1,6 +1,5 @@
 /**
  * Match service - handles match-related operations
- * Optimized with parallel queries and efficient data fetching
  */
 
 const cache = require('../utils/cache');
@@ -10,106 +9,93 @@ const { TABLES } = require('../utils/tablesNames');
 const { getFantasyKey } = require('../utils/helper');
 
 /**
- * Check if mega contest is available for match
- * @param {number} matchId - Match ID
- * @returns {Promise<number>} Mega contest value
- */
-const isMegaContestAvailable = async (matchId) => {
-    const cacheKey = `contest:mega:${matchId}`;
-
-    return await cache.cacheAside(
-        cacheKey,
-        async () => {
-            try {
-                const result = await queryOne(`
-                    SELECT SUM(total_winning_prize) as total_prize 
-                    FROM ${TABLES.CREATE_CONTESTS} 
-                    WHERE match_id = ? 
-                    AND contest_type IN ('1', '6', '14', '24', '10', '18', '17', '25', '21', '29')
-                    AND is_cancelled = 0`,
-                    [matchId]
-                );
-
-                const contestMega = parseInt(result?.total_prize || 0);
-                return contestMega > 100 ? contestMega : 0;
-            } catch (error) {
-                logError(error, { context: 'isMegaContestAvailable', matchId });
-                return 0;
-            }
-        },
-        1800 // 30 mins
-    );
-};
-
-/**
- * Get matches with players (base query)
- * @param {number} page - Page number
- * @param {number} limit - Items per page
- * @returns {Promise<Object>} Paginated matches
+ * Get all matches with all related data in ONE query
+ * This eliminates the N+1 query problem
  */
 const getMatchesWithPlayers = async (page = 1, limit = 10) => {
     try {
         const offset = (page - 1) * limit;
         const currentTime = Math.floor(Date.now() / 1000);
 
-        // Get total count for pagination
-        const countQuery = `
+        // Single optimized query with all JOINs
+        const query = `
+            SELECT 
+                -- Match data
+                m.match_id, m.title, m.short_title, m.subtitle,
+                m.status, m.status_str, m.timestamp_start, m.timestamp_end,
+                m.date_start, m.date_end, m.game_state, m.game_state_str,
+                m.status_note, m.is_free, m.competition_id, m.format_str,
+                m.format, m.event_name, m.last_match_played,
+                
+                -- Team A data
+                ta.team_id as teama_id, ta.name as teama_name,
+                ta.short_name as teama_short_name, ta.logo_url as teama_logo_url,
+                
+                -- Team B data
+                tb.team_id as teamb_id, tb.name as teamb_name,
+                tb.short_name as teamb_short_name, tb.logo_url as teamb_logo_url,
+                
+                -- Competition/League data
+                comp.title as league_title,
+                
+                -- Lineup count (subquery)
+                (SELECT COUNT(*) FROM ${TABLES.TEAM_A_SQUADS} tas 
+                 WHERE tas.match_id = m.match_id AND tas.playing11 = 'true') as lineup_count,
+                
+                -- Player count (subquery)
+                (SELECT COUNT(*) FROM ${TABLES.MASTER_PLAYER} mp 
+                 WHERE mp.match_id = m.match_id) as player_count,
+                
+                -- Mega contest value (subquery)
+                COALESCE(
+                    (SELECT SUM(total_winning_prize) 
+                     FROM ${TABLES.CREATE_CONTESTS} cc 
+                     WHERE cc.match_id = m.match_id 
+                     AND cc.contest_type IN ('1','6','14','24','10','18','17','25','21','29')
+                     AND cc.is_cancelled = 0
+                     AND total_winning_prize > 100
+                    ), 0
+                ) as mega_contest_value,
+                
+                -- Free contest prize (subquery)
+                (SELECT total_winning_prize 
+                 FROM ${TABLES.CREATE_CONTESTS} fc 
+                 WHERE fc.match_id = m.match_id 
+                 AND fc.entry_fees = 0 
+                 AND fc.is_cancelled = 0 
+                 AND fc.total_winning_prize > 0 
+                 AND fc.is_private = 0 
+                 LIMIT 1
+                ) as free_contest_prize
+                
+            FROM ${TABLES.MATCHES} m
+            LEFT JOIN ${TABLES.TEAM_A} ta ON m.match_id = ta.match_id
+            LEFT JOIN ${TABLES.TEAM_B} tb ON m.match_id = tb.match_id
+            LEFT JOIN ${TABLES.COMPETITIONS} comp ON m.competition_id = comp.cid
+            
+            WHERE m.status IN (1, 3)
+            AND m.timestamp_start >= ${currentTime}
+            AND m.is_cancelled = 0
+            
+            GROUP BY m.match_id
+            ORDER BY m.is_free DESC, m.timestamp_start ASC
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+        console.log(query);
+        const matches = await queryAll(query);
+
+        // Get total count
+        const countResult = await queryOne(`
             SELECT COUNT(DISTINCT m.match_id) as total
             FROM ${TABLES.MATCHES} m
             INNER JOIN ${TABLES.MASTER_PLAYER} mp ON m.match_id = mp.match_id
             WHERE m.status IN (1, 3)
-            AND m.timestamp_start >= '${currentTime}'
+            AND m.timestamp_start >= ?
             AND m.is_cancelled = 0
-        `;
+        `, [currentTime]);
 
-        logger.info(countQuery.replace(/\n/g, ' '));
-        const [countResult] = await queryAll(countQuery, [currentTime]);
         const totalItems = countResult?.total || 0;
         const totalPages = Math.ceil(totalItems / limit);
-
-        // Get matches with teams
-        const matchesQuery = `
-            SELECT DISTINCT
-                m.match_id,
-                m.title,
-                m.short_title,
-                m.subtitle,
-                m.status,
-                m.status_str,
-                m.timestamp_start,
-                m.timestamp_end,
-                m.date_start,
-                m.date_end,
-                m.game_state,
-                m.game_state_str,
-                m.status_note,
-                m.is_free,
-                m.competition_id,
-                m.format_str,
-                m.format,
-                m.event_name,
-                m.last_match_played,
-                ta.team_id as teama_id,
-                ta.name as teama_name,
-                ta.short_name as teama_short_name,
-                ta.logo_url as teama_logo_url,
-                tb.team_id as teamb_id,
-                tb.name as teamb_name,
-                tb.short_name as teamb_short_name,
-                tb.logo_url as teamb_logo_url
-            FROM ${TABLES.MATCHES} m
-            INNER JOIN ${TABLES.MASTER_PLAYER} mp ON m.match_id = mp.match_id
-            LEFT JOIN ${TABLES.TEAM_A} ta ON m.match_id = ta.match_id
-            LEFT JOIN ${TABLES.TEAM_B} tb ON m.match_id = tb.match_id
-            WHERE m.status IN (1, 3)
-            AND m.timestamp_start >= '${currentTime}'
-            AND m.is_cancelled = 0
-            ORDER BY m.is_free DESC, m.timestamp_start ASC
-            LIMIT ${limit} OFFSET ${offset}
-        `;
-
-        logger.info(matchesQuery.replace(/\n/g, ' '));
-        const matches = await queryAll(matchesQuery);
 
         return {
             matches,
@@ -121,134 +107,47 @@ const getMatchesWithPlayers = async (page = 1, limit = 10) => {
             },
         };
     } catch (error) {
-        logError(error, { context: 'getMatchesWithPlayers' });
+        logError(error, { context: 'getMatchesOptimized' });
         throw error;
     }
 };
 
-
 /**
- * Get league title for competition
- * @param {number} competitionId - Competition ID
- * @returns {Promise<string|null>} League title
+ * Get guru count separately (batch query for all matches at once)
+ * @param {Array<number>} matchIds - Array of match IDs
+ * @returns {Promise<Record<number, number>>} Map of match_id to guru_count
  */
-const getLeagueTitle = async (competitionId) => {
+const getBatchGuruCounts = async (matchIds) => {
     try {
-        if (!competitionId) return null;
+        if (!matchIds || matchIds.length === 0) return {};
 
-        const cacheKey = `league:${competitionId}`;
-        return await cache.cacheAside(
-            cacheKey,
-            async () => {
-                const result = await queryOne(
-                    `SELECT title FROM ${TABLES.COMPETITIONS} WHERE cid = ? LIMIT 1`,
-                    [competitionId]
-                );
-                return result?.title || null;
-            },
-            3600 // Cache for 1 hour
-        );
-    } catch (error) {
-        logError(error, { context: 'getLeagueTitle', competitionId });
-        return null;
-    }
-};
-
-/**
- * Get lineup count for match
- * @param {number} matchId - Match ID
- * @returns {Promise<number>} Lineup count
- */
-const getLineupCount = async (matchId) => {
-    try {
-        const result = await queryOne(`
-            SELECT COUNT(*) as count 
-            FROM ${TABLES.TEAM_A_SQUADS} 
-            WHERE match_id = ? 
-            AND playing11 = 'true'
-        `, [matchId]
-        );
-        return result?.count || 0;
-    } catch (error) {
-        logError(error, { context: 'getLineupCount', matchId });
-        return 0;
-    }
-};
-
-/**
- * Get total guru count for match
- * @param {number} matchId - Match ID
- * @returns {Promise<number>} Guru count
- */
-const getTotalGuruCount = async (matchId) => {
-    try {
-        // First get promoter IDs
-        const promoters = await queryAll(
-            `SELECT user_id FROM ${TABLES.PROMOTERS_LIST} WHERE status = 2`
+        const promoters = await queryOne(`
+            SELECT GROUP_CONCAT(user_id) as ids 
+            FROM ${TABLES.PROMOTERS_LIST} 
+            WHERE status = 2`
         );
 
-        if (!promoters || promoters.length === 0) {
-            return 0;
-        }
+        if (!promoters?.ids) return {};
 
-        const promoterIds = promoters.map(p => p.user_id);
-
-        // Count guru teams
-        const placeholders = promoterIds.map(() => '?').join(',');
-        const result = await queryOne(`
-            SELECT COUNT(*) as count FROM ${TABLES.CREATE_TEAMS} 
-            WHERE match_id = ? 
-            AND user_id IN (${placeholders}) 
+        // Get guru counts for all matches in ONE query
+        const placeholders = matchIds.map(() => '?').join(',');
+        const results = await queryAll(`
+            SELECT match_id, COUNT(*) as guru_count 
+            FROM ${TABLES.CREATE_TEAMS} 
+            WHERE match_id IN (${placeholders})
+            AND user_id IN (${promoters.ids})
             AND team_count = 'T1'
-            `, [matchId, ...promoterIds]
-        );
+            GROUP BY match_id
+        `, matchIds);
 
-        return result?.count || 0;
+        // Convert to map for O(1) lookup
+        return results.reduce((acc, row) => {
+            acc[row.match_id] = row.guru_count;
+            return acc;
+        }, {});
     } catch (error) {
-        logError(error, { context: 'getTotalGuruCount', matchId });
-        return 0;
-    }
-};
-
-/**
- * Get player count for match
- * @param {number} matchId - Match ID
- * @returns {Promise<number>} Player count
- */
-const getPlayerCount = async (matchId) => {
-    try {
-        const result = await queryOne(
-            `SELECT COUNT(*) as count FROM ${TABLES.MASTER_PLAYER} WHERE match_id = ?`,
-            [matchId]
-        );
-        return result?.count || 0;
-    } catch (error) {
-        logError(error, { context: 'getPlayerCount', matchId });
-        return 0;
-    }
-};
-
-/**
- * Check if free contest exists for match
- * @param {number} matchId - Match ID
- * @returns {Promise<Object|null>} Free contest info or null
- */
-const getFreeContest = async (matchId) => {
-    try {
-        const result = await queryOne(`
-            SELECT total_winning_prize FROM ${TABLES.CREATE_CONTESTS} 
-            WHERE match_id = ? 
-            AND entry_fees = 0 
-            AND is_cancelled = 0 
-            AND total_winning_prize > 0 
-            AND is_private = 0 
-            LIMIT 1
-       `, [matchId]
-        );
-        return result;
-    } catch (error) {
-        logError(error, { context: 'getFreeContest', matchId });
-        return null;
+        logError(error, { context: 'getBatchGuruCounts' });
+        return {};
     }
 };
 
@@ -259,28 +158,20 @@ const getFreeContest = async (matchId) => {
  */
 const formatMatchDate = (timestamp) => {
     const currentTime = Math.floor(Date.now() / 1000);
-    const timeDiff = Math.round((timestamp - currentTime) / 60); // in minutes
+    const timeDiff = Math.round((timestamp - currentTime) / 60);
 
-    let dateStart;
     const date = new Date(timestamp * 1000);
+    let dateStart;
 
-    if (timeDiff > 1440) { // More than 24 hours
-        // Format: 01 Jan 2024, 03:30 PM
+    if (timeDiff > 1440) {
         dateStart = date.toLocaleString('en-IN', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
+            day: '2-digit', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', hour12: true,
             timeZone: 'Asia/Kolkata'
         });
     } else {
-        // Format: 03:30 PM
         dateStart = date.toLocaleString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
+            hour: '2-digit', minute: '2-digit', hour12: true,
             timeZone: 'Asia/Kolkata'
         });
     }
@@ -298,111 +189,67 @@ const formatMatchDate = (timestamp) => {
  * @param {Object} match - Raw match data
  * @returns {Promise<Object>} Transformed match
  */
-const transformMatch = async (match) => {
+const transformMatch = (match, guruCount = 0) => {
+    const { date_start, time_left, time_diff_minutes } = formatMatchDate(match.timestamp_start);
+
+    // Handle last match played
+    let lastMatchPlayed = match.last_match_played;
     try {
-        const matchId = match.match_id;
-
-        // Parallel execution of all queries for better performance
-        const [
-            leagueTitle,
-            lineupCount,
-            totalGuru,
-            playerCount,
-            megaContestValue,
-            freeContest,
-        ] = await Promise.all([
-            getLeagueTitle(match.competition_id),
-            getLineupCount(matchId),
-            getTotalGuruCount(matchId),
-            getPlayerCount(matchId),
-            isMegaContestAvailable(matchId),
-            getFreeContest(matchId),
-        ]);
-
-        // Format date and time
-        const { date_start, time_left, time_diff_minutes } = formatMatchDate(match.timestamp_start);
-
-        // Build transformed match object
-        const transformed = {
-            match_id: match.match_id,
-            title: match.title,
-            short_title: match.short_title,
-            subtitle: match.subtitle,
-            status: match.status,
-            status_str: match.status_str,
-            timestamp_start: match.timestamp_start,
-            timestamp_end: match.timestamp_end,
-            date_start,
-            date_end: match.date_end,
-            game_state: match.game_state,
-            game_state_str: match.game_state_str,
-            status_note: match.status_note,
-            is_free: match.is_free,
-            competition_id: match.competition_id,
-            format_str: match.format_str,
-            format: match.format,
-            event_name: match.event_name,
-            league_title: leagueTitle,
-            time_left,
-            joined_single_player: 3, // Static value as in original
-            is_lineup: lineupCount > 1,
-            single_player_available: playerCount,
-            isMasterExist: 1, // Static as in original
-            isNormalExist: 1, // Static as in original
-            total_guru: totalGuru,
-
-            // Team data
-            teama: match.teama_id ? {
-                team_id: match.teama_id,
-                name: match.teama_name,
-                short_name: match.teama_short_name,
-                logo_url: match.teama_logo_url,
-            } : null,
-            teamb: match.teamb_id ? {
-                team_id: match.teamb_id,
-                name: match.teamb_name,
-                short_name: match.teamb_short_name,
-                logo_url: match.teamb_logo_url,
-            } : null,
-        };
-
-        // Update status based on time difference
-        if (time_diff_minutes > 0.5) {
-            transformed.status = 1;
-            transformed.status_str = 'Upcoming';
-        }
-
-        // Handle mega contest
-        if (megaContestValue > 0) {
-            transformed.event_name = megaContestValue;
-        }
-
-        // Handle last match played data
-        let lastMatchPlayed = match.last_match_played;
-        try {
-            const decoded = lastMatchPlayed ? JSON.parse(lastMatchPlayed) : null;
-            if (!decoded || (Array.isArray(decoded) && decoded.length === 0)) {
-                lastMatchPlayed = '[{"player_id":null,"title":"Last match played data is not available"}]';
-            }
-        } catch (e) {
+        const decoded = lastMatchPlayed ? JSON.parse(lastMatchPlayed) : null;
+        if (!decoded || (Array.isArray(decoded) && decoded.length === 0)) {
             lastMatchPlayed = '[{"player_id":null,"title":"Last match played data is not available"}]';
         }
-        transformed.last_match_played = lastMatchPlayed;
-
-        // Handle free contest
-        if (freeContest) {
-            transformed.has_free_contest = true;
-            transformed.total_winning_prize = freeContest.total_winning_prize;
-        } else {
-            transformed.has_free_contest = match.is_free === 1;
-        }
-
-        return transformed;
-    } catch (error) {
-        logError(error, { context: 'transformMatch', matchId: match.match_id });
-        // Return basic match data on error
-        return match;
+    } catch (e) {
+        lastMatchPlayed = '[{"player_id":null,"title":"Last match played data is not available"}]';
     }
+
+    const transformed = {
+        match_id: match.match_id,
+        title: match.title,
+        short_title: match.short_title,
+        subtitle: match.subtitle,
+        status: time_diff_minutes > 0.5 ? 1 : match.status,
+        status_str: time_diff_minutes > 0.5 ? 'Upcoming' : match.status_str,
+        timestamp_start: match.timestamp_start,
+        timestamp_end: match.timestamp_end,
+        date_start,
+        date_end: match.date_end,
+        game_state: match.game_state,
+        game_state_str: match.game_state_str,
+        status_note: match.status_note,
+        is_free: match.is_free,
+        competition_id: match.competition_id,
+        format_str: match.format_str,
+        format: match.format,
+        event_name: match.mega_contest_value > 0 ? match.mega_contest_value : match.event_name,
+        league_title: match.league_title,
+        time_left,
+        joined_single_player: 3,
+        is_lineup: match.lineup_count > 1,
+        single_player_available: match.player_count,
+        isMasterExist: 1,
+        isNormalExist: 1,
+        total_guru: guruCount,
+        last_match_played: lastMatchPlayed,
+        has_free_contest: match.free_contest_prize ? true : match.is_free === 1,
+        ...(match.free_contest_prize && {
+            total_winning_prize: match.free_contest_prize
+        }),
+        teama: match.teama_id ? {
+            team_id: match.teama_id,
+            name: match.teama_name,
+            short_name: match.teama_short_name,
+            logo_url: match.teama_logo_url,
+        } : null,
+        teamb: match.teamb_id ? {
+            team_id: match.teamb_id,
+            name: match.teamb_name,
+            short_name: match.teamb_short_name,
+            logo_url: match.teamb_logo_url,
+        } : null,
+    };
+
+    return transformed;
 };
 
 /**
@@ -410,10 +257,10 @@ const transformMatch = async (match) => {
  * @param {Object} params - Query parameters
  * @returns {Promise<Object>} Matches response
  */
-const getMatches = async (body, params) => {
+const getMatches = async (params) => {
     const { page = 1 } = params;
     const pageNum = parseInt(page) || 1;
-    const cacheKey = `matches:cricket:${pageNum}`;
+    const cacheKey = `matches:cricket:page:${pageNum}`;
 
     try {
         // Use cache-aside pattern
@@ -445,16 +292,21 @@ const getMatches = async (body, params) => {
                     };
                 }
 
-                // Transform all matches in parallel for better performance
-                const transformedMatches = await Promise.all(
-                    matches.map(match => transformMatch(match))
+                // Get guru counts for all matches in ONE batch query
+                const matchIds = matches.map(m => m.match_id);
+                const guruCounts = await getBatchGuruCounts(matchIds);
+
+
+                // Transform matches
+                const transformedMatches = matches.map(match =>
+                    transformMatch(match, guruCounts[match.match_id] || 0)
                 );
 
                 // Get maintenance status
-                const maintain = await getFantasyKey('APP_MAINTAINANCE');
+                const maintainanceStatus = await getFantasyKey('APP_MAINTAINANCE');
 
                 const result = {
-                    maintainance: maintain == 1,
+                    maintainance: maintainanceStatus == 1,
                     session_expired: false,
                     total_result: transformedMatches.length,
                     status: true,
@@ -481,7 +333,5 @@ const getMatches = async (body, params) => {
 };
 
 module.exports = {
-    getMatches,
-    isMegaContestAvailable,
-    transformMatch,
+    getMatches
 };

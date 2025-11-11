@@ -10,9 +10,8 @@ const matchesService = require('../services/match.service');
 exports.getMatchHandler = async (request, reply) => {
     try {
         const page = request.query.page || 1;
-        const body = request.body || {};
 
-        const result = await matchesService.getMatches(body, { page });
+        const result = await matchesService.getMatches({ page });
 
         return success(reply, result, result.code || 200);
     } catch (err) {
