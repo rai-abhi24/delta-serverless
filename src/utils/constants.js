@@ -44,10 +44,28 @@ module.exports = {
         FANTASY_KEYS: (key) => `fantasyKeys:${key}`,
         USER_LAST_ACTIVE: (userId) => `user:${userId}:lastActive`,
 
-        BANNER_CATALOG: () => `cat:bnr:glb:v1`,
-        USER_BANNER_FEED: (userId) => `feed:banner:usr:${userId}:v2`,
-        USER_MATCHES_AGGREGATE: (userId) => `agg:mtch:usr:${userId}:v1`,
-        MATCH_METADATA_BATCH: (matchIds) => `meta:mtch:batch:${matchIds.join('-')}:v1`,
+        BANNER_CATALOG: () => `cat:bnr:glb`,
+        USER_BANNER_FEED: (userId) => `feed:banner:usr:${userId}`,
+        USER_MATCHES_AGGREGATE: (userId) => `agg:mtch:usr:${userId}`,
+        MATCH_METADATA_BATCH: (matchIds) => `meta:mtch:batch:${matchIds.join('-')}`,
+
+        MATCH_META: (matchId) => `meta:mtch:${matchId}`,
+        CONTEST_CATALOG: (matchId) => `cat:cont:mtch:${matchId}`,
+        USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
+        USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
+        CONTEST_FEED: (matchId, userId, page) => `feed:cont:${matchId}:${userId}:p${page}`,
+        CONTEST_TYPES: () => `meta:cont:types`,
+    },
+
+    CACHE_EXPIRY: {
+        THIRTY_SECONDS: 30,
+        ONE_MINUTE: 60,
+        TWO_MINUTES: 120,
+        THREE_MINUTES: 180,
+        FOUR_MINUTES: 240,
+        FIVE_MINUTES: 300,
+        ONE_HOUR: 3600,
+        ONE_DAY: 86400
     },
 
     // iOS app configuration

@@ -48,3 +48,17 @@ exports.getBannersSchema = {
         },
     },
 };
+
+exports.getContestByMatchSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['match_id', 'user_id'],
+            properties: {
+                match_id: { type: 'string' },
+                user_id: { type: 'string' },
+            },
+            additionalProperties: false
+        },
+    },
+};
