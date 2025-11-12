@@ -55,7 +55,7 @@ app.get('/health', async (_request, reply) => {
     });
 });
 
-app.register(v1Routes, { prefix: '/api/v1' });
+app.register(v1Routes, { prefix: '/api/v6' });
 
 // Global error handler
 app.setErrorHandler((err, request, reply) => {

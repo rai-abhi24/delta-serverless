@@ -1,11 +1,17 @@
 
 const schemas = require('../../schemas');
+const { authenticate } = require('../../middlewares/auth.middleware');
 const { bannerHandler } = require('../../handlers/banner.handler');
 const { getMatchHandler } = require('../../handlers/match.handler');
 const { apkUpdateHandler } = require('../../handlers/apkUpdate.handler');
 const { getContestByMatchHandler } = require('../../handlers/contest.handler');
+const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 
 module.exports = async (app) => {
+    // Auth routes
+    app.post("/loginByMobileNumber", { schema: schemas.loginSchema }, loginHandler);
+    app.post("/logout", { preHandler: authenticate }, logoutHandler);
+
     // APK update endpoint
     app.post("/apkUpdate", { schema: schemas.apkUpdateSchema }, apkUpdateHandler);
 

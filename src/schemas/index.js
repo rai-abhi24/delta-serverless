@@ -62,3 +62,18 @@ exports.getContestByMatchSchema = {
         },
     },
 };
+
+exports.loginSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['mobile_number', 'password', 'device_token'],
+            properties: {
+                mobile_number: { type: 'string', minLength: 10, maxLength: 15 },
+                password: { type: 'string', minLength: 4 },
+                device_token: { type: 'string' },
+            },
+            additionalProperties: false
+        },
+    },
+};

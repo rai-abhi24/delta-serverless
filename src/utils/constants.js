@@ -55,6 +55,10 @@ module.exports = {
         USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
         CONTEST_FEED: (matchId, userId, page) => `feed:cont:${matchId}:${userId}:p${page}`,
         CONTEST_TYPES: () => `meta:cont:types`,
+
+        USER_TOKEN: (hashedToken) => `token:${hashedToken}`,
+        USER_BY_MOBILE: (mobileNumber) => `user:mobile:${mobileNumber}`,
+        USER_BY_ID: (userId) => `user:id:${userId}`,
     },
 
     CACHE_EXPIRY: {

@@ -27,7 +27,7 @@ exports.apkUpdateHandler = async (request, reply) => {
         // Add whatsAppLink to response (always included)
         result.whatsAppLink = result.whatsAppLink || 'https://t.me/delta11admin';
 
-        return success(reply, result, result.code || 200);
+        return success(reply, result, 200);
     } catch (err) {
         logger.error({
             error: err.message,
