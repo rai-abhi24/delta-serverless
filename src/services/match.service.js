@@ -7,6 +7,7 @@ const { logError, logger } = require('../utils/logger');
 const { queryAll, queryOne } = require('../config/database');
 const { TABLES } = require('../utils/tablesNames');
 const { getFantasyKey } = require('../utils/helper');
+const { CACHE_KEYS, CACHE_EXPIRY, MATCH_STATUS } = require('../utils/constants');
 
 /**
  * Get all matches with all related data in ONE query
@@ -260,7 +261,7 @@ const transformMatch = (match, guruCount = 0) => {
 const getMatches = async (params) => {
     const { page = 1 } = params;
     const pageNum = parseInt(page) || 1;
-    const cacheKey = `matches:cricket:page:${pageNum}`;
+    const cacheKey = CACHE_KEYS.MATCHES(pageNum);
 
     try {
         // Use cache-aside pattern
@@ -332,6 +333,332 @@ const getMatches = async (params) => {
     }
 };
 
+/* --------------------------------- Match History --------------------------------- */
+
+/**
+ * Get user's match IDs for all action types in ONE query
+ */
+const getUserMatchIds = async (userId) => {
+    const cacheKey = CACHE_KEYS.USER_MATCH_IDS(userId);
+
+    return await cache.cacheAside(
+        cacheKey,
+        async () => {
+            const query = `
+                SELECT DISTINCT match_id, 'normal' as source
+                FROM ${TABLES.JOIN_CONTESTS}
+                WHERE user_id = ?
+                UNION
+                SELECT DISTINCT match_id, 'master' as source
+                FROM ${TABLES.MASTER_JOIN_CONTESTS}
+                WHERE user_id = ?
+            `;
+
+            const results = await queryAll(query, [userId, userId]);
+            return results.map(r => r.match_id);
+        },
+        CACHE_EXPIRY.FIVE_MINUTES
+    );
+};
+
+/**
+ * Get matches with all related data in ONE optimized query
+ */
+const getMatchesWithStats = async (userId, matchIds, actionType, page = 1, limit = 10) => {
+    try {
+        const offset = (page - 1) * limit;
+        const currentTime = Math.floor(Date.now() / 1000);
+
+        let whereClause = '';
+        if (actionType === 'upcoming') {
+            whereClause = `AND m.status = 1 AND m.timestamp_start >= ${currentTime}`;
+        } else if (actionType === 'completed') {
+            whereClause = `AND m.status IN (2, 4)`;
+        } else if (actionType === 'live') {
+            whereClause = `AND m.status = 3`;
+        }
+
+        const matchIdsStr = matchIds.join(',');
+
+        const query = `
+            SELECT 
+                m.match_id, m.title, m.short_title, m.status, m.status_str,
+                m.timestamp_start, m.timestamp_end, m.date_start, m.date_end,
+                m.game_state, m.game_state_str, m.competition_id, m.current_status,
+                m.is_free,
+                
+                -- Team A
+                ta.team_id as teama_id, ta.name as teama_name,
+                ta.short_name as teama_short_name, ta.logo_url as teama_logo_url,
+                
+                -- Team B
+                tb.team_id as teamb_id, tb.name as teamb_name,
+                tb.short_name as teamb_short_name, tb.logo_url as teamb_logo_url,
+                
+                -- League title
+                comp.title as league_title,
+                
+                -- User stats (all in subqueries to avoid N+1)
+                (SELECT COUNT(*) FROM ${TABLES.MASTER_JOIN_CONTESTS} mjc
+                 WHERE mjc.match_id = m.match_id AND mjc.user_id = ${userId}) as master_contests,
+                
+                (SELECT COUNT(*) FROM ${TABLES.JOIN_CONTESTS} jc
+                 WHERE jc.match_id = m.match_id AND jc.user_id = ${userId}) as normal_teams,
+                
+                (SELECT COUNT(DISTINCT contest_id) FROM ${TABLES.JOIN_CONTESTS} jc2
+                 WHERE jc2.match_id = m.match_id AND jc2.user_id = ${userId}) as normal_contests,
+                
+                (SELECT COUNT(*) FROM ${TABLES.CREATE_TEAMS} ct
+                 WHERE ct.match_id = m.match_id AND ct.user_id = ${userId}) as created_teams,
+                
+                (SELECT COUNT(*) FROM ${TABLES.MASTER_PLAYER} mp
+                 WHERE mp.match_id = m.match_id) as player_count,
+                
+                -- Prize amount (only for completed/live)
+                ${actionType !== 'upcoming' ? `
+                (SELECT COALESCE(SUM(winning_amount), 0)
+                 FROM ${TABLES.JOIN_CONTESTS} jc3
+                 WHERE jc3.match_id = m.match_id 
+                 AND jc3.user_id = ${userId}
+                 AND jc3.ranks > 0
+                 AND jc3.cancel_contest = 0
+                 AND jc3.winning_amount > 0) as prize_amount
+                ` : '0 as prize_amount'}
+                
+            FROM ${TABLES.MATCHES} m
+            LEFT JOIN ${TABLES.TEAM_A} ta ON m.match_id = ta.match_id
+            LEFT JOIN ${TABLES.TEAM_B} tb ON m.match_id = tb.match_id
+            LEFT JOIN ${TABLES.COMPETITIONS} comp ON m.competition_id = comp.cid
+            
+            WHERE m.match_id IN (${matchIdsStr})
+            ${whereClause}
+            
+            ORDER BY ${actionType === 'upcoming' ? 'm.created_at DESC' : actionType === 'live' ? 'm.updated_at DESC' : 'm.timestamp_start DESC'}
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        const matches = await queryAll(query);
+
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM ${TABLES.MATCHES} m
+            WHERE m.match_id IN (${matchIdsStr})
+            ${whereClause}
+        `;
+
+        const countResult = await queryOne(countQuery);
+
+        return {
+            matches,
+            total: countResult?.total || 0
+        };
+    } catch (error) {
+        logError(error, { context: 'getMatchesWithStats', userId, actionType });
+        return { matches: [], total: 0 };
+    }
+};
+
+/**
+ * Transform match data with proper status calculation
+ */
+const transformMatchHistory = (match, actionType) => {
+    const currentTime = Math.floor(Date.now() / 1000);
+    const timeDiff = Math.round((match.timestamp_start - currentTime) / 60);
+
+    let statusStr = match.status_str;
+    let status = match.status;
+
+    if (actionType === 'upcoming') {
+        statusStr = 'Upcoming';
+        status = MATCH_STATUS.UPCOMING;
+    } else if (actionType === 'live') {
+        if (timeDiff > 0.5) {
+            statusStr = 'Upcoming Live';
+            status = MATCH_STATUS.LIVE;
+        } else {
+            statusStr = 'Live';
+            status = MATCH_STATUS.LIVE;
+        }
+    } else if (actionType === 'completed') {
+        if (match.status === MATCH_STATUS.ABANDONED) {
+            statusStr = 'Abandoned';
+        } else if (match.status === MATCH_STATUS.COMPLETED) {
+            statusStr = match.current_status === MATCH_STATUS.IN_REVIEW ? 'In Review' : 'Completed';
+        }
+    }
+
+    const dateStart = new Date(match.timestamp_start * 1000)
+        .toLocaleString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'Asia/Kolkata'
+        });
+
+    return {
+        match_id: match.match_id,
+        title: match.title,
+        short_title: match.short_title,
+        status,
+        status_str: statusStr,
+        timestamp_start: match.timestamp_start,
+        timestamp_end: match.timestamp_end,
+        date_start: dateStart,
+        date_end: match.date_end,
+        game_state: match.game_state,
+        game_state_str: match.game_state_str,
+        competition_id: match.competition_id,
+        current_status: match.current_status,
+
+        // League
+        league_title: match.league_title,
+
+        // Flags
+        has_free_contest: match.is_free === 1,
+        isMasterExist: parseInt(match.master_contests || 0),
+        isNormalExist: parseInt(match.normal_teams || 0),
+
+        // User stats
+        single_player_available: parseInt(match.player_count || 0),
+        total_joined_team: parseInt(match.normal_teams || 0),
+        total_join_contests: parseInt(match.normal_contests || 0),
+        total_created_team: parseInt(match.created_teams || 0),
+
+        // Prize (only for completed/live)
+        ...(actionType !== 'upcoming' && {
+            prize_amount: parseFloat(match.prize_amount || 0).toFixed(2)
+        }),
+
+        // Teams
+        teama: match.teama_id ? {
+            team_id: match.teama_id,
+            name: match.teama_name,
+            short_name: match.teama_short_name,
+            logo_url: match.teama_logo_url
+        } : null,
+
+        teamb: match.teamb_id ? {
+            team_id: match.teamb_id,
+            name: match.teamb_name,
+            short_name: match.teamb_short_name,
+            logo_url: match.teamb_logo_url
+        } : null
+    };
+};
+
+/**
+ * Get match history by action type
+ * Main entry point
+ */
+const getMatchHistory = async (userId, actionType, page = 1) => {
+    const startTime = Date.now();
+
+    try {
+        if (!userId) {
+            return {
+                system_time: Math.floor(Date.now() / 1000),
+                status: false,
+                code: 201,
+                message: 'User not found'
+            };
+        }
+
+        if (!['upcoming', 'completed', 'live'].includes(actionType)) {
+            return {
+                system_time: Math.floor(Date.now() / 1000),
+                status: false,
+                code: 400,
+                message: 'Invalid action type'
+            };
+        }
+
+        const cacheKey = CACHE_KEYS.MATCH_HISTORY(userId, actionType, page);
+
+        return await cache.cacheAside(
+            cacheKey,
+            async () => {
+                const matchIds = await getUserMatchIds(userId);
+
+                if (!matchIds || matchIds.length === 0) {
+                    return {
+                        status: true,
+                        code: 200,
+                        message: 'success',
+                        system_time: Math.floor(Date.now() / 1000),
+                        response: {
+                            matchdata: [{
+                                action_type: actionType,
+                                [actionType === 'upcoming' ? 'upcomingMatch' : actionType]: []
+                            }]
+                        },
+                        pagination: {
+                            current_page: page,
+                            total_pages: 0
+                        }
+                    };
+                }
+
+                const { matches, total } = await getMatchesWithStats(
+                    userId,
+                    matchIds,
+                    actionType,
+                    page
+                );
+
+                const transformedMatches = matches.map(m => transformMatchHistory(m, actionType));
+
+                const totalPages = Math.ceil(total / 10);
+                const typeKey = actionType === 'upcoming' ? 'upcomingMatch' : actionType;
+
+                const result = {
+                    status: true,
+                    code: 200,
+                    message: 'success',
+                    system_time: Math.floor(Date.now() / 1000),
+                    response: {
+                        matchdata: [{
+                            action_type: actionType,
+                            [typeKey]: transformedMatches
+                        }]
+                    },
+                    pagination: {
+                        current_page: page,
+                        total_pages: totalPages
+                    },
+                    _meta: {
+                        processing_time_ms: Date.now() - startTime
+                    }
+                };
+
+                return result;
+            },
+
+            // Different cache TTLs based on action type
+            actionType === 'upcoming' ? CACHE_EXPIRY.ONE_MINUTE :
+                actionType === 'live' ? CACHE_EXPIRY.THIRTY_SECONDS :
+                    CACHE_EXPIRY.ONE_DAY
+        );
+
+    } catch (error) {
+        logError(error, { context: 'getMatchHistory', userId, actionType });
+
+        return {
+            system_time: Math.floor(Date.now() / 1000),
+            status: false,
+            code: 500,
+            message: 'Failed to fetch match history',
+            _meta: {
+                processing_time_ms: Date.now() - startTime,
+                error: true
+            }
+        };
+    }
+};
+
 module.exports = {
-    getMatches
+    getMatches,
+    getMatchHistory,
 };

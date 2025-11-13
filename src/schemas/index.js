@@ -35,6 +35,26 @@ exports.getMatchSchema = {
     }
 };
 
+exports.getMatchHistorySchema = {
+    schema: {
+        querystring: {
+            type: 'object',
+            properties: {
+                page: { type: 'number' }
+            }
+        },
+        body: {
+            type: 'object',
+            required: ['user_id', 'action_type'],
+            properties: {
+                user_id: { type: 'string' },
+                action_type: { type: 'string', enum: ['upcoming', 'completed', 'live'] }
+            },
+            additionalProperties: false
+        }
+    }
+};
+
 exports.getBannersSchema = {
     schema: {
         body: {

@@ -2,7 +2,7 @@
 const schemas = require('../../schemas');
 const { authenticate } = require('../../middlewares/auth.middleware');
 const { bannerHandler } = require('../../handlers/banner.handler');
-const { getMatchHandler } = require('../../handlers/match.handler');
+const { getMatchHandler, getMatchHistoryHandler } = require('../../handlers/match.handler');
 const { apkUpdateHandler } = require('../../handlers/apkUpdate.handler');
 const { getContestByMatchHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
@@ -20,6 +20,7 @@ module.exports = async (app) => {
 
     // Match endpoints
     app.post("/getMatch", { schema: schemas.getMatchSchema }, getMatchHandler);
+    app.post("/getMatchHistory", { schema: schemas.getMatchHistorySchema }, getMatchHistoryHandler);
 
     // Contest endpoints
     app.post("/getContestByMatch", { schema: schemas.getContestByMatchSchema }, getContestByMatchHandler);

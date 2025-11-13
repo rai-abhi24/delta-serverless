@@ -46,7 +46,7 @@ app.addHook('onRequest', async (request) => {
 app.addHook('onResponse', async (request, reply) => {
     const duration = Date.now() - request.startTime;
     logResponse(request, reply, duration);
-})
+});
 
 app.get('/health', async (_request, reply) => {
     return success(reply, {

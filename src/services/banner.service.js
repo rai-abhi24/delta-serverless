@@ -48,7 +48,7 @@ const getPromotionalBanners = async () => {
             async () => {
                 const banners = await queryAll(`
                     SELECT title, url, actiontype, description FROM ${TABLES.BANNERS}
-                    WHERE type = '${BANNER_TYPES.PROMOTION}'
+                    WHERE type = 'Banner'
                     ORDER BY created_at DESC
                     LIMIT 10
                 `);

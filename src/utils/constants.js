@@ -49,6 +49,10 @@ module.exports = {
         USER_MATCHES_AGGREGATE: (userId) => `agg:mtch:usr:${userId}`,
         MATCH_METADATA_BATCH: (matchIds) => `meta:mtch:batch:${matchIds.join('-')}`,
 
+        MATCHES: (pageNum) => `mtch:p${pageNum}`,
+        USER_MATCH_IDS: (userId) => `usr:match:ids:${userId}`,
+        MATCH_HISTORY: (userId, actionType, page) => `hist:mtch:${actionType}:${userId}:p${page}`,
+
         MATCH_META: (matchId) => `meta:mtch:${matchId}`,
         CONTEST_CATALOG: (matchId) => `cat:cont:mtch:${matchId}`,
         USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
@@ -70,6 +74,14 @@ module.exports = {
         FIVE_MINUTES: 300,
         ONE_HOUR: 3600,
         ONE_DAY: 86400
+    },
+
+    MATCH_STATUS: {
+        IN_REVIEW: 0,
+        UPCOMING: 1,
+        COMPLETED: 2,
+        LIVE: 3,
+        ABANDONED: 4
     },
 
     // iOS app configuration
