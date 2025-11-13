@@ -9,15 +9,27 @@ const apkUpdateService = require('../services/apkUpdate.service');
  */
 exports.apkUpdateHandler = async (request, reply) => {
     try {
-        const { user_id, version_code, os_type } = request.body || {};
-
-        if (user_id) {
-            setImmediate(() => {
-                userService.updateLastActive(user_id).catch(err => {
-                    logger.warn({ userId: user_id, error: err.message });
+        if (request.user) {
+            const user_id = request.user || {};
+            if (user_id) {
+                setImmediate(() => {
+                    userService.updateLastActive(user_id).catch(err => {
+                        logger.warn({ userId: user_id, error: err.message });
+                    });
                 });
-            });
+            }
+        } else {
+            const userName = request.body.user_id;
+            if (userName) {
+                setImmediate(() => {
+                    userService.updateLastActiveByUsername(userName).catch(err => {
+                        logger.warn({ userName, error: err.message });
+                    });
+                });
+            }
         }
+
+        const { version_code, os_type } = request.body || {};
 
         const result = await apkUpdateService.checkApkUpdate({
             version_code,

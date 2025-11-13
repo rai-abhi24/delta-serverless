@@ -20,7 +20,7 @@ module.exports = {
 
     // Response codes
     HTTP_STATUS: {
-        SUCCESS: 200,
+        OK: 200,
         NO_UPDATE: 201,
         BAD_REQUEST: 400,
         UNAUTHORIZED: 401,

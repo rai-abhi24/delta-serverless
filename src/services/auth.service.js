@@ -72,8 +72,8 @@ const createAccessToken = async (userId, name) => {
         const tokenId = result.insertId;
         const fullToken = `${tokenId}|${plainTextToken}`;
 
-        const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
-        await cache.set(cacheKey, { userId, tokenId }, 2592000);
+        // const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
+        // await cache.set(cacheKey, { userId, tokenId }, 2592000);
 
         return fullToken;
     } catch (error) {
@@ -308,8 +308,8 @@ const validateToken = async (token) => {
         const hashedToken = crypto.createHash('sha256').update(plainTextToken).digest('hex');
 
         // Check cache first
-        const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
-        const cached = await cache.get(cacheKey);
+        // const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
+        const cached = null; // await cache.get(cacheKey);
 
         if (cached) {
             executeQuery(
@@ -323,7 +323,6 @@ const validateToken = async (token) => {
             return await userService.findUserById(cached.userId);
         }
 
-        // Query from DB if not in cache
         const accessToken = await queryOne(`
             SELECT 
                 id,
@@ -390,8 +389,8 @@ const logout = async (token) => {
             [hashedToken]
         );
 
-        const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
-        await cache.del(cacheKey);
+        // const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
+        // await cache.del(cacheKey);
 
         return true;
     } catch (error) {

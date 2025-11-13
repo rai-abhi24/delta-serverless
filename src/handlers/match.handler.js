@@ -4,7 +4,7 @@
  */
 
 const { logger } = require('../utils/logger');
-const { success, error } = require('../utils/response');
+const { success, error, unauthorized } = require('../utils/response');
 const matchesService = require('../services/match.service');
 const userService = require('../services/user.service');
 
@@ -34,7 +34,12 @@ exports.getMatchHandler = async (request, reply) => {
 exports.getMatchHistoryHandler = async (request, reply) => {
     try {
         const page = request.query.page || 1;
-        const { user_id, action_type } = request.body;
+        const { action_type } = request.body;
+        const { user_id } = request?.user || {};
+
+        if (!user_id) {
+            return unauthorized(reply);
+        }
 
         setImmediate(() => {
             userService.updateLastActive(user_id).catch(err => {

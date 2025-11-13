@@ -14,7 +14,7 @@ exports.getWalletHandler = async (request, reply) => {
     const startTime = Date.now();
 
     try {
-        const { user_id } = request.body || {};
+        const { id: user_id } = request.user;
         const platform = request.headers.platform || 'ANDROID';
 
         if (!user_id) {

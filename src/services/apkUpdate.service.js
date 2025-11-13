@@ -28,7 +28,7 @@ const checkIOSUpdate = async (versionCode) => {
     if (versionCode < IOS_CONFIG.MIN_VERSION_CODE) {
         return {
             status: true,
-            code: HTTP_STATUS.SUCCESS,
+            code: HTTP_STATUS.OK,
             message: 'success',
             title: 'Minor Bug Fixes',
             url: IOS_CONFIG.APP_STORE_URL,
@@ -108,7 +108,7 @@ const buildUpdateResponse = (versionInfo, promotions, adsSettings) => {
     return {
         splashScreen: config.app.splashScreen,
         status: true,
-        code: HTTP_STATUS.SUCCESS,
+        code: HTTP_STATUS.OK,
         message: versionInfo.message || 'Update is available',
         url: config.app.downloadApkPath,
         title: versionInfo.title,

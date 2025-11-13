@@ -29,6 +29,11 @@ const findUserById = async (userId) => {
                 mobile_number,
                 email,
                 is_account_verified,
+                team_name,
+                rating,
+                current_balance,
+                total_balance,
+                affiliate_user,
                 referal_code,
                 current_level,
                 profile_image,
@@ -109,7 +114,7 @@ const updateLastActive = async (userId) => {
         const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
         executeQuery(
-            `UPDATE ${TABLES.USERS} SET last_active_at = ? WHERE user_name = ?`,
+            `UPDATE ${TABLES.USERS} SET last_active_at = ? WHERE id = ?`,
             [now, userId]
         ).catch(error => {
             logError(error, { context: 'updateLastActive', userId });
@@ -122,6 +127,35 @@ const updateLastActive = async (userId) => {
     } catch (error) {
         // Don't throw - this is a non-critical operation
         logError(error, { context: 'updateLastActive', userId });
+        return false;
+    }
+};
+
+/**
+ * Update user's last active timestamp
+ * Uses async operation to avoid blocking the response
+ * @param {string} userName - User name
+ * @returns {Promise<boolean>} Success status
+ */
+const updateLastActiveByUsername = async (userName) => {
+    try {
+        if (!userName) {
+            return false;
+        }
+
+        const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+        executeQuery(
+            `UPDATE ${TABLES.USERS} SET last_active_at = ? WHERE user_name = ?`,
+            [now, userName]
+        ).catch(error => {
+            logError(error, { context: 'updateLastActiveByUsername', userName });
+        });
+
+        return true;
+    } catch (error) {
+        // Don't throw - this is a non-critical operation
+        logError(error, { context: 'updateLastActiveByUsername', userName });
         return false;
     }
 };
@@ -147,7 +181,7 @@ const getLastActive = async (userId) => {
 
         // Query database
         const result = await queryOne(
-            `SELECT last_active_at FROM ${TABLES.USERS} WHERE user_name = ? LIMIT 1`,
+            `SELECT last_active_at FROM ${TABLES.USERS} WHERE id = ? LIMIT 1`,
             [userId]
         );
 
@@ -167,5 +201,6 @@ module.exports = {
     findUserById,
     findUserByMobile,
     updateLastActive,
+    updateLastActiveByUsername,
     getLastActive,
 };

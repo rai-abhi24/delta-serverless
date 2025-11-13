@@ -8,6 +8,7 @@ const { TABLES } = require('../utils/tablesNames');
 const { CACHE_KEYS, CACHE_EXPIRY } = require('../utils/constants');
 const { logError } = require('../utils/logger');
 const { getFantasyKey } = require('../utils/helper');
+const userService = require('./user.service');
 
 /**
  * Get wallet balances by payment type
@@ -191,7 +192,7 @@ const getReferralCount = async (userId) => {
         const user = await queryOne(`
             SELECT referal_code
             FROM ${TABLES.USERS}
-            WHERE user_name = ?
+            WHERE id = ?
             LIMIT 1
         `, [userId]);
 
@@ -348,12 +349,7 @@ const getWallet = async (userId, platform = 'ANDROID') => {
         return await cache.cacheAside(
             cacheKey,
             async () => {
-                const user = await queryOne(`
-                    SELECT id, user_name, name, email, mobile_number
-                    FROM ${TABLES.USERS}
-                    WHERE user_name = ?
-                    LIMIT 1
-                `, [userId]);
+                const user = await userService.findUserById(userId);
 
                 if (!user) {
                     return {
@@ -415,7 +411,12 @@ const getWallet = async (userId, platform = 'ANDROID') => {
                         user_name: user.user_name,
                         name: user.name,
                         email: user.email,
-                        mobile_number: user.mobile_number
+                        mobile_number: user.mobile_number,
+                        team_name: user.team_name,
+                        rating: user.rating,
+                        current_balance: user.current_balance,
+                        total_balance: user.total_balance,
+                        affiliate_user: user.affiliate_user
                     }
                 };
             },

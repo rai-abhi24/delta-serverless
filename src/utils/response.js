@@ -12,7 +12,7 @@ const { HTTP_STATUS } = require('./constants');
  * @param {number} statusCode - HTTP status code
  * @returns {Object} Fastify reply
  */
-const success = (reply, data, statusCode = HTTP_STATUS.SUCCESS) => {
+const success = (reply, data, statusCode = HTTP_STATUS.OK) => {
     return reply.code(statusCode).send({
         status: true,
         code: statusCode,
@@ -58,8 +58,18 @@ const validationError = (reply, errors) => {
  * @param {string} message - Error message
  * @returns {Object} Fastify reply
  */
-const unauthorized = (reply, message = 'Unauthorized') => {
-    return error(reply, message, HTTP_STATUS.UNAUTHORIZED);
+const unauthorized = (reply, message = 'Unauthenticated') => {
+    return reply.code(HTTP_STATUS.OK).send({
+        status: true,
+        code: HTTP_STATUS.OK,
+        session_expired: true,
+        message: 'Unauthenticated',
+        url: "https://gamezone-assets.s3.ap-south-1.amazonaws.com/delta11/delta11.apk",
+        title: "App Update",
+        release_note: null,
+        promotion: null,
+        ads_setting: null
+    });
 };
 
 /**
