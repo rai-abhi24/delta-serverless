@@ -4,8 +4,9 @@
 
 const { queryOne, executeQuery } = require('../config/database');
 const cache = require('../utils/cache');
-const { CACHE_KEYS } = require('../utils/constants');
-const { logger, logError } = require('../utils/logger');
+const { CACHE_KEYS, CACHE_EXPIRY } = require('../utils/constants');
+const { logError } = require('../utils/logger');
+const { TABLES } = require('../utils/tablesNames');
 
 /**
  * Find user by ID
@@ -13,19 +14,82 @@ const { logger, logError } = require('../utils/logger');
  * @returns {Promise<Object|null>} User object or null
  */
 const findUserById = async (userId) => {
+    const cacheKey = CACHE_KEYS.USER_BY_ID(userId);
     try {
-        if (!userId) {
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
+        const user = await queryOne(`
+            SELECT 
+                id,
+                name,
+                user_name,
+                mobile_number,
+                email,
+                is_account_verified,
+                referal_code,
+                current_level,
+                profile_image,
+                team_name,
+                status,
+                is_account_deleted
+            FROM ${TABLES.USERS}
+            WHERE id = ?
+            LIMIT 1
+        `, [userId]);
+
+        if (!user) {
             return null;
         }
 
-        const user = await queryOne(
-            'SELECT * FROM users WHERE id = ? LIMIT 1',
-            [userId]
-        );
-
+        await cache.set(cacheKey, user, CACHE_EXPIRY.ONE_DAY);
         return user;
     } catch (error) {
         logError(error, { context: 'findUserById', userId });
+        throw error;
+    }
+};
+
+
+/**
+ * Find user by mobile number
+ * @param {string} mobileNumber - User's mobile number
+ * @returns {Promise<Object|null>} User object or null
+ */
+const findUserByMobile = async (mobileNumber) => {
+    const cacheKey = CACHE_KEYS.USER_BY_MOBILE(mobileNumber);
+    try {
+        return await cache.cacheAside(
+            cacheKey,
+            async () => {
+                const user = await queryOne(`
+                    SELECT 
+                        id,
+                        name,
+                        user_name,
+                        mobile_number,
+                        email,
+                        password,
+                        is_account_verified,
+                        referal_code,
+                        current_level,
+                        profile_image,
+                        team_name,
+                        status,
+                        is_account_deleted
+                    FROM ${TABLES.USERS}
+                    WHERE mobile_number = ?
+                    LIMIT 1
+                `, [mobileNumber]);
+
+                return user;
+            },
+            CACHE_EXPIRY.ONE_DAY
+        );
+    } catch (error) {
+        logError(error, { context: 'findUserByMobile', mobileNumber });
         throw error;
     }
 };
@@ -45,7 +109,7 @@ const updateLastActive = async (userId) => {
         const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
         executeQuery(
-            'UPDATE users SET last_active_at = ? WHERE id = ?',
+            `UPDATE ${TABLES.USERS} SET last_active_at = ? WHERE user_name = ?`,
             [now, userId]
         ).catch(error => {
             logError(error, { context: 'updateLastActive', userId });
@@ -83,7 +147,7 @@ const getLastActive = async (userId) => {
 
         // Query database
         const result = await queryOne(
-            'SELECT last_active_at FROM users WHERE id = ? LIMIT 1',
+            `SELECT last_active_at FROM ${TABLES.USERS} WHERE user_name = ? LIMIT 1`,
             [userId]
         );
 
@@ -101,6 +165,7 @@ const getLastActive = async (userId) => {
 
 module.exports = {
     findUserById,
+    findUserByMobile,
     updateLastActive,
     getLastActive,
 };

@@ -52,7 +52,7 @@ const getMatchContests = async (matchId, page = 1, limit = 10) => {
                 const query = `
                     SELECT 
                         cc.id as contest_id, cc.contest_type, cc.entry_fees, cc.mrp as max_fees, cc.total_spots, cc.filled_spot, 
-                        cc.fake_counter, cc.total_winning_prize, cc.first_prize, cc.winner_percentage, cc.winner_count, 
+                        cc.fake_counter, cc.total_winning_prize, cc.first_prize, cc.winner_percentage,
                         cc.prize_percentage, cc.usable_bonus, cc.bonus_contest, cc.is_flexible, cc.is_bte, cc.is_cancelled, 
                         cc.cancellation, cc.sort_by, cc.extra_cash, cc.expert_id,
                         
@@ -73,7 +73,7 @@ const getMatchContests = async (matchId, page = 1, limit = 10) => {
                         -- Count total contests of this type
                         (SELECT COUNT(*) 
                          FROM ${TABLES.CREATE_CONTESTS} cc2
-                         WHERE cc2.match_id = ?
+                         WHERE cc2.match_id = '${matchId}'
                          AND cc2.contest_type = cc.contest_type
                          AND cc2.is_cancelled = 0
                          AND cc2.is_private = 0
@@ -88,7 +88,7 @@ const getMatchContests = async (matchId, page = 1, limit = 10) => {
                     LEFT JOIN ${TABLES.FANTASY_EXPERTS} fe
                         ON cc.expert_id = fe.user_id AND cc.is_bte = 1
                     
-                    WHERE cc.match_id = ?
+                    WHERE cc.match_id = '${matchId}'
                     AND cc.is_cancelled = 0
                     AND cc.is_private = 0
                     AND cc.filled_spot < cc.total_spots
@@ -97,10 +97,10 @@ const getMatchContests = async (matchId, page = 1, limit = 10) => {
                         cc.sort_by ASC,
                         cc.filled_spot DESC
                     
-                    LIMIT ? OFFSET ?
+                    LIMIT ${limit} OFFSET ${offset}
                 `;
 
-                const contests = await queryAll(query, [matchId, matchId, limit, offset]);
+                const contests = await queryAll(query);
 
                 const countResult = await queryOne(`
                     SELECT COUNT(*) as total 
@@ -139,7 +139,7 @@ const getUserJoinedContests = async (matchId, userId) => {
                     SELECT 
                         jc.contest_id,
                         COUNT(jc.id) as teams_joined,
-                        GROUP_CONCAT(jc.team_id) as team_ids
+                        GROUP_CONCAT(jc.created_team_id) as team_ids
                     FROM ${TABLES.JOIN_CONTESTS} jc
                     WHERE jc.match_id = ?
                     AND jc.user_id = ?

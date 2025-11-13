@@ -340,6 +340,7 @@ const getMatches = async (params) => {
  */
 const getUserMatchIds = async (userId) => {
     const cacheKey = CACHE_KEYS.USER_MATCH_IDS(userId);
+    logger.info(`getUserMatchIds: cacheKey=${cacheKey}`);
 
     return await cache.cacheAside(
         cacheKey,
@@ -353,7 +354,7 @@ const getUserMatchIds = async (userId) => {
                 FROM ${TABLES.MASTER_JOIN_CONTESTS}
                 WHERE user_id = ?
             `;
-
+            logger.info(`getMatchHistory: query=${query}`);
             const results = await queryAll(query, [userId, userId]);
             return results.map(r => r.match_id);
         },
@@ -555,6 +556,7 @@ const transformMatchHistory = (match, actionType) => {
  */
 const getMatchHistory = async (userId, actionType, page = 1) => {
     const startTime = Date.now();
+    logger.info(`getMatchHistory: userId=${userId}, actionType=${actionType}, page=${page}`);
 
     try {
         if (!userId) {
@@ -576,7 +578,7 @@ const getMatchHistory = async (userId, actionType, page = 1) => {
         }
 
         const cacheKey = CACHE_KEYS.MATCH_HISTORY(userId, actionType, page);
-
+        logger.info(`getMatchHistory: cacheKey=${cacheKey}`);
         return await cache.cacheAside(
             cacheKey,
             async () => {

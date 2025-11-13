@@ -191,7 +191,7 @@ const getReferralCount = async (userId) => {
         const user = await queryOne(`
             SELECT referal_code
             FROM ${TABLES.USERS}
-            WHERE id = ?
+            WHERE user_name = ?
             LIMIT 1
         `, [userId]);
 
@@ -351,7 +351,7 @@ const getWallet = async (userId, platform = 'ANDROID') => {
                 const user = await queryOne(`
                     SELECT id, user_name, name, email, mobile_number
                     FROM ${TABLES.USERS}
-                    WHERE id = ?
+                    WHERE user_name = ?
                     LIMIT 1
                 `, [userId]);
 

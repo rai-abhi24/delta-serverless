@@ -38,7 +38,7 @@ app.register(fastifyCompress, {
     encodings: ['gzip', 'deflate'],
 });
 
-app.addHook('onRequest', async (request) => {
+app.addHook('preHandler', async (request) => {
     request.startTime = Date.now();
     logRequest(request);
 });

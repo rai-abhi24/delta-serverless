@@ -6,6 +6,7 @@ const { getMatchHandler, getMatchHistoryHandler } = require('../../handlers/matc
 const { apkUpdateHandler, getStoriesHandler, getRecentWinnersHandler } = require('../../handlers/basic.handler');
 const { getContestByMatchHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
+const { getWalletHandler } = require('../../handlers/wallet.handler');
 
 module.exports = async (app) => {
     /* Auth routes */
@@ -22,11 +23,32 @@ module.exports = async (app) => {
 
     /* Match routes */
     app.post("/getMatch", { schema: schemas.getMatchSchema }, getMatchHandler);
-    app.post("/getMatchHistory", { schema: schemas.getMatchHistorySchema }, getMatchHistoryHandler);
+    app.post("/getMatchHistory", {
+        preHandler: authenticate,
+        schema: schemas.getMatchHistorySchema
+    }, getMatchHistoryHandler);
 
     /* Contest routes */
     app.post("/getContestByMatch", { schema: schemas.getContestByMatchSchema }, getContestByMatchHandler);
 
     /* Wallet routes */
     app.post("/getWallet", { schema: schemas.getWalletSchema }, getWalletHandler);
+
+    // ============================================
+    // TODO: Below routes are not implemented yet
+    // ============================================
+    /* Duo routes */
+    app.post("/getDuoPlayers",
+        { schema: schemas.getDuoSchema },
+        async (_request, reply) => {
+            return reply.send({
+                "status": true,
+                "code": 200,
+                "duoContests": {
+                    "duoPlayers": []
+                },
+                "message": "Player fetched successfully!"
+            });
+        }
+    );
 };

@@ -9,7 +9,8 @@ const cache = require('../utils/cache');
 const { TABLES } = require('../utils/tablesNames');
 const { logError, logger } = require('../utils/logger');
 const { queryOne, executeQuery } = require('../config/database');
-const { CACHE_KEYS, CACHE_EXPIRY } = require('../utils/constants');
+const { CACHE_KEYS } = require('../utils/constants');
+const userService = require('./user.service');
 
 /**
  * Generate a secure token string
@@ -17,7 +18,7 @@ const { CACHE_KEYS, CACHE_EXPIRY } = require('../utils/constants');
  * @returns {Object} { plainTextToken, hashedToken }
  */
 const generateToken = () => {
-    const entropy = crypto.randomBytes(40).toString('hex');
+    const entropy = crypto.randomBytes(32).toString('hex');
     const crc32 = crypto.createHash('md5').update(entropy).digest('hex').substring(0, 8);
     const plainTextToken = `${entropy}${crc32}`;
     const hashedToken = crypto.createHash('sha256').update(plainTextToken).digest('hex');
@@ -39,52 +40,11 @@ const verifyPassword = (password, hash) => {
 };
 
 /**
- * Find user by mobile number
- * @param {string} mobileNumber - User's mobile number
- * @returns {Promise<Object|null>} User object or null
- */
-const findUserByMobile = async (mobileNumber) => {
-    const cacheKey = CACHE_KEYS.USER_BY_MOBILE(mobileNumber);
-    try {
-        return await cache.cacheAside(
-            cacheKey,
-            async () => {
-                const user = await queryOne(`
-                    SELECT 
-                        id,
-                        name,
-                        user_name,
-                        mobile_number,
-                        email,
-                        password,
-                        is_account_verified,
-                        referal_code,
-                        current_level,
-                        profile_image,
-                        team_name,
-                        status,
-                        is_account_deleted
-                    FROM ${TABLES.USERS}
-                    WHERE mobile_number = ?
-                    LIMIT 1
-                `, [mobileNumber]);
-
-                return user;
-            },
-            CACHE_EXPIRY.ONE_HOUR
-        );
-    } catch (error) {
-        logError(error, { context: 'findUserByMobile', mobileNumber });
-        throw error;
-    }
-};
-
-/**
  * Create access token for user
  * @param {number} userId - User ID
  * @returns {Promise<string>} Token string in format {id}|{plainTextToken}
  */
-const createAccessToken = async (userId) => {
+const createAccessToken = async (userId, name) => {
     try {
         const { plainTextToken, hashedToken } = generateToken();
         const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -101,7 +61,7 @@ const createAccessToken = async (userId) => {
         `, [
             'App\\User',
             userId,
-            String(userId),
+            name,
             hashedToken,
             JSON.stringify(['*']),
             now,
@@ -112,7 +72,7 @@ const createAccessToken = async (userId) => {
         const tokenId = result.insertId;
         const fullToken = `${tokenId}|${plainTextToken}`;
 
-        const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken, userId);
+        const cacheKey = CACHE_KEYS.USER_TOKEN(hashedToken);
         await cache.set(cacheKey, { userId, tokenId }, 2592000);
 
         return fullToken;
@@ -247,7 +207,7 @@ const loginByMobile = async (credentials) => {
     const { mobile_number, password } = credentials;
 
     try {
-        const user = await findUserByMobile(mobile_number);
+        const user = await userService.findUserByMobile(mobile_number);
 
         if (!user) {
             return {
@@ -300,7 +260,7 @@ const loginByMobile = async (credentials) => {
             }
         }
 
-        const token = await createAccessToken(user.id);
+        const token = await createAccessToken(user.id, user.name);
 
         const userData = {
             id: user.id,
@@ -352,7 +312,6 @@ const validateToken = async (token) => {
         const cached = await cache.get(cacheKey);
 
         if (cached) {
-            // Update last_used_at asynchronously (non-blocking)
             executeQuery(
                 `UPDATE ${TABLES.PERSONAL_ACCESS_TOKENS} 
                  SET last_used_at = ? 
@@ -361,7 +320,7 @@ const validateToken = async (token) => {
             ).catch(err => logger.warn({ error: err.message }, 'Failed to update token last_used_at'));
 
             // Return user from cache
-            return await findUserById(cached.userId);
+            return await userService.findUserById(cached.userId);
         }
 
         // Query from DB if not in cache
@@ -405,55 +364,10 @@ const validateToken = async (token) => {
         }, 2592000);
 
         // Get and return user
-        return await findUserById(accessToken.tokenable_id);
+        return await userService.findUserById(accessToken.tokenable_id);
     } catch (error) {
         logError(error, { context: 'validateToken' });
         return null;
-    }
-};
-
-/**
- * Find user by ID (helper for token validation)
- * @param {number} userId - User ID
- * @returns {Promise<Object|null>} User object or null
- */
-const findUserById = async (userId) => {
-    const cacheKey = CACHE_KEYS.USER_BY_ID(userId);
-    try {
-        const cached = await cache.get(cacheKey);
-        if (cached) {
-            return cached;
-        }
-
-        const user = await queryOne(`
-            SELECT 
-                id,
-                name,
-                user_name,
-                mobile_number,
-                email,
-                is_account_verified,
-                referal_code,
-                current_level,
-                profile_image,
-                team_name,
-                status,
-                is_account_deleted
-            FROM ${TABLES.USERS}
-            WHERE id = ?
-            LIMIT 1
-        `, [userId]);
-
-        if (!user) {
-            return null;
-        }
-
-        await cache.set(cacheKey, user, CACHE_EXPIRY.ONE_DAY);
-
-        return user;
-    } catch (error) {
-        logError(error, { context: 'findUserById', userId });
-        throw error;
     }
 };
 
