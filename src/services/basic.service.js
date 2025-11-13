@@ -185,7 +185,71 @@ const getRecentWinners = async () => {
     }
 };
 
+/**
+ * Update user's device token for notifications
+ * @param {string|number} userId - User ID
+ * @param {string} deviceId - Device token
+ * @returns {Promise<Object>} Update result
+ */
+const updateDeviceToken = async (userId, deviceId) => {
+    try {
+        const user = await queryOne(
+            `SELECT id, status, is_account_deleted FROM ${TABLES.USERS} WHERE id = ? LIMIT 1`,
+            [userId]
+        );
+
+        if (!user) {
+            return {
+                status: false,
+                code: 201,
+                message: 'User not found'
+            };
+        }
+
+        if (user.is_account_deleted === 1) {
+            return {
+                status: false,
+                code: 201,
+                message: 'Account is deleted'
+            };
+        }
+
+        if (user.status === 0) {
+            return {
+                status: false,
+                code: 201,
+                message: 'Account is disabled'
+            };
+        }
+
+        await executeQuery(
+            `UPDATE ${TABLES.USERS} SET device_id = ? WHERE id = ?`,
+            [deviceId, userId]
+        );
+
+        const cacheKey = CACHE_KEYS.USER_BY_ID(userId);
+        await cache.del(cacheKey);
+
+        logger.info('Device token updated', { userId, deviceId: deviceId.substring(0, 10) + '...' });
+
+        return {
+            status: true,
+            code: 200,
+            message: 'notification updated'
+        };
+    } catch (error) {
+        logError(error, { context: 'updateDeviceToken', userId });
+
+        return {
+            status: false,
+            code: 500,
+            message: 'something went wrong'
+        };
+    }
+};
+
 module.exports = {
     getStories,
     getRecentWinners,
+    updateDeviceToken,
 };

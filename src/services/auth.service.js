@@ -357,10 +357,10 @@ const validateToken = async (token) => {
         ).catch(err => logger.warn({ error: err.message }, 'Failed to update token last_used_at'));
 
         // Cache token for future requests
-        await cache.set(cacheKey, {
-            userId: accessToken.tokenable_id,
-            tokenId: accessToken.id
-        }, 2592000);
+        // await cache.set(cacheKey, {
+        //     userId: accessToken.tokenable_id,
+        //     tokenId: accessToken.id
+        // }, 2592000);
 
         // Get and return user
         return await userService.findUserById(accessToken.tokenable_id);

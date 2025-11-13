@@ -71,6 +71,7 @@ const logResponse = (request, reply, duration) => {
         statusCode: reply.statusCode,
         duration,
         requestId: request.id,
+        body: reply.body,
     }, 'Request completed');
 };
 

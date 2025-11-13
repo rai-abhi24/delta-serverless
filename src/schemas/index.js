@@ -147,3 +147,17 @@ exports.getDuoSchema = {
         }
     }
 };
+
+exports.deviceNotificationSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['user_id', 'device_id'],
+            properties: {
+                user_id: { type: 'string' },
+                device_id: { type: 'string', minLength: 1 }
+            },
+            additionalProperties: false
+        }
+    }
+};

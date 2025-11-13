@@ -10,7 +10,7 @@ const apkUpdateService = require('../services/apkUpdate.service');
 exports.apkUpdateHandler = async (request, reply) => {
     try {
         if (request.user) {
-            const user_id = request.user || {};
+            const user_id = request.user.id || {};
             if (user_id) {
                 setImmediate(() => {
                     userService.updateLastActive(user_id).catch(err => {
@@ -87,5 +87,35 @@ exports.getRecentWinnersHandler = async (_request, reply) => {
         }, 'Error in getRecentWinners handler');
 
         return error(reply, 'Failed to fetch recent winners', 500);
+    }
+};
+
+/**
+ * Device Notification Handler
+ */
+exports.deviceNotificationHandler = async (request, reply) => {
+    try {
+        const user_id = request.user.id || {};
+        const { device_id } = request.body || {};
+
+        if (!user_id || !device_id) {
+            return error(reply, !user_id ? 'user_id is required' : 'device_id is required', 400);
+        }
+
+        const result = await basicService.updateDeviceToken(user_id, device_id);
+
+        if (!result.status) {
+            return error(reply, result.message, result.code);
+        }
+
+        return success(reply, result, result.code);
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            body: request.body,
+        }, 'Error in deviceNotification handler');
+
+        return error(reply, 'Failed to update notification settings', 500);
     }
 };

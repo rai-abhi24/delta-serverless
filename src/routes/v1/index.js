@@ -3,7 +3,7 @@ const schemas = require('../../schemas');
 const { authenticate } = require('../../middlewares/auth.middleware');
 const { bannerHandler } = require('../../handlers/banner.handler');
 const { getMatchHandler, getMatchHistoryHandler } = require('../../handlers/match.handler');
-const { apkUpdateHandler, getStoriesHandler, getRecentWinnersHandler } = require('../../handlers/basic.handler');
+const { apkUpdateHandler, getStoriesHandler, getRecentWinnersHandler, deviceNotificationHandler } = require('../../handlers/basic.handler');
 const { getContestByMatchHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 const { getWalletHandler } = require('../../handlers/wallet.handler');
@@ -30,6 +30,11 @@ module.exports = async (app) => {
         preHandler: authenticate,
         schema: schemas.getRecentWinnersSchema
     }, getRecentWinnersHandler);
+
+    app.post("/deviceNotification", {
+        preHandler: authenticate,
+        schema: schemas.deviceNotificationSchema
+    }, deviceNotificationHandler);
 
     /* Banner routes */
     app.post("/getBanners", {
@@ -75,6 +80,19 @@ module.exports = async (app) => {
                 "duoPlayers": []
             },
             "message": "Player fetched successfully!"
+        });
+    });
+
+    app.post("/getLevelReward", {
+        preHandler: authenticate,
+        schema: schemas.getWalletSchema
+    }, async (_request, reply) => {
+        return reply.send({
+            "status": true,
+            "code": 200,
+            "messgae": "Level reward data fethed successfully",
+            "is_level_reward_completed": 1,
+            "data": ""
         });
     });
 };
