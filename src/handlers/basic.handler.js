@@ -49,7 +49,7 @@ exports.getStoriesHandler = async (_request, reply) => {
     try {
         const stories = await basicService.getStories();
 
-        return reply.code(200).send(stories);
+        return success(reply, stories);
     } catch (err) {
         logger.error({
             error: err.message,
@@ -67,7 +67,7 @@ exports.getRecentWinnersHandler = async (_request, reply) => {
     try {
         const result = await basicService.getRecentWinners();
 
-        return reply.code(200).send(result);
+        return success(reply, result);
     } catch (err) {
         logger.error({
             error: err.message,

@@ -66,6 +66,14 @@ module.exports = {
         USER_TOKEN: (hashedToken) => `token:${hashedToken}`,
         USER_BY_MOBILE: (mobileNumber) => `user:mobile:${mobileNumber}`,
         USER_BY_ID: (userId) => `user:id:${userId}`,
+
+        WALLET_BALANCES: (userId) => `wlt:bal:${userId}`,
+        WALLET_FULL: (userId, platform) => `wlt:full:${userId}:${platform}`,
+        DOCUMENT_STATUS: (userId) => `doc:sts:${userId}`,
+        BANK_ACCOUNT_STATUS: (userId) => `bnk:sts:${userId}`,
+        REFERRAL_COUNT: (userId) => `ref:cnt:${userId}`,
+        ACCOUNT_VERIFICATION: (userId) => `acc:ver:${userId}`,
+        PAYMENT_GATEWAYS: (platform) => `pay:gtw:${platform}`,
     },
 
     CACHE_EXPIRY: {
@@ -75,9 +83,14 @@ module.exports = {
         THREE_MINUTES: 180,
         FOUR_MINUTES: 240,
         FIVE_MINUTES: 300,
+        TEN_MINUTES: 600,
         ONE_HOUR: 3600,
         HALF_DAY: 43200,
-        ONE_DAY: 86400
+        ONE_DAY: 86400,
+        MINUTE: (minutes) => minutes * 60,
+        HOUR: (hours) => hours * 3600,
+        DAY: (days) => days * 86400,
+        WEEK: (weeks) => weeks * 604800,
     },
 
     MATCH_STATUS: {

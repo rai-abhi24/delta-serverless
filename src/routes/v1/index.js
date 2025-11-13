@@ -8,22 +8,25 @@ const { getContestByMatchHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 
 module.exports = async (app) => {
-    // Auth routes
+    /* Auth routes */
     app.post("/loginByMobileNumber", { schema: schemas.loginSchema }, loginHandler);
     app.post("/logout", { preHandler: authenticate }, logoutHandler);
 
-    // Basic endpoints
+    /* Basic routes */
     app.post("/apkUpdate", { schema: schemas.apkUpdateSchema }, apkUpdateHandler);
     app.get("/getStories", { schema: schemas.getStoriesSchema }, getStoriesHandler);
     app.get("/getRecentWinners", { schema: schemas.getRecentWinnersSchema }, getRecentWinnersHandler);
 
-    // Banner endpoint
+    /* Banner routes */
     app.post("/getBanners", { schema: schemas.getBannersSchema }, bannerHandler);
 
-    // Match endpoints
+    /* Match routes */
     app.post("/getMatch", { schema: schemas.getMatchSchema }, getMatchHandler);
     app.post("/getMatchHistory", { schema: schemas.getMatchHistorySchema }, getMatchHistoryHandler);
 
-    // Contest endpoints
+    /* Contest routes */
     app.post("/getContestByMatch", { schema: schemas.getContestByMatchSchema }, getContestByMatchHandler);
+
+    /* Wallet routes */
+    app.post("/getWallet", { schema: schemas.getWalletSchema }, getWalletHandler);
 };

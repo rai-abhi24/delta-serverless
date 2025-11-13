@@ -121,3 +121,16 @@ exports.getRecentWinnersSchema = {
         }
     }
 };
+
+exports.getWalletSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['user_id'],
+            properties: {
+                user_id: { type: 'string' }
+            },
+            additionalProperties: false
+        }
+    }
+};
