@@ -97,3 +97,27 @@ exports.loginSchema = {
         },
     },
 };
+
+exports.getStoriesSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            properties: {
+                user_id: { type: 'string' }
+            },
+            additionalProperties: false
+        }
+    }
+};
+
+exports.getRecentWinnersSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            properties: {
+                user_id: { type: 'string' }
+            },
+            additionalProperties: false
+        }
+    }
+};

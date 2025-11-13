@@ -38,10 +38,13 @@ module.exports = {
 
     // Cache keys
     CACHE_KEYS: {
-        APK_UPDATE: (versionCode) => `apkUpdate:${versionCode}`,
-        PROMOTIONS: 'promotionsBanners',
-        ADS_SETTINGS: 'adsSettings',
+        ADS_SETTINGS: 'glb:ads:settings',
+        PROMOTIONS: 'glb:banner:promotions',
+        STORIES: 'glb:stories',
+        RECENT_WINNERS: 'glb:winners:recent',
+
         FANTASY_KEYS: (key) => `fantasyKeys:${key}`,
+        APK_UPDATE: (versionCode) => `apkUpdate:${versionCode}`,
         USER_LAST_ACTIVE: (userId) => `user:${userId}:lastActive`,
 
         BANNER_CATALOG: () => `cat:bnr:glb`,
@@ -73,6 +76,7 @@ module.exports = {
         FOUR_MINUTES: 240,
         FIVE_MINUTES: 300,
         ONE_HOUR: 3600,
+        HALF_DAY: 43200,
         ONE_DAY: 86400
     },
 

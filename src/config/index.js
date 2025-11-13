@@ -54,6 +54,7 @@ const config = {
 
     // App configuration
     app: {
+        baseUrl: process.env.BASE_URL || '',
         splashScreen: process.env.SPLASH_SCREEN || '',
         downloadApkPath: process.env.DOWNLOAD_APK_PATH || '',
         forceUpdate: process.env.FORCE_UPDATE === 'true',
