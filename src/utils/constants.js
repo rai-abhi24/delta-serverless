@@ -60,7 +60,7 @@ module.exports = {
         CONTEST_CATALOG: (matchId) => `cat:cont:mtch:${matchId}`,
         USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
         USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
-        CONTEST_FEED: (matchId, userId, page) => `feed:cont:${matchId}:${userId}:p${page}`,
+        CONTEST_FEED: (matchId, page) => `feed:cont:${matchId}:p${page}`,
         CONTEST_TYPES: () => `meta:cont:types`,
 
         USER_TOKEN: (hashedToken) => `token:${hashedToken}`,

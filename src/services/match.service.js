@@ -82,7 +82,7 @@ const getMatchesWithPlayers = async (page = 1, limit = 10) => {
             ORDER BY m.is_free DESC, m.timestamp_start ASC
             LIMIT ${limit} OFFSET ${offset}
         `;
-        console.log(query);
+
         const matches = await queryAll(query);
 
         // Get total count

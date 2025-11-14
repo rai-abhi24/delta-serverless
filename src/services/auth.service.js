@@ -5,7 +5,6 @@
 const https = require('https');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const cache = require('../utils/cache');
 const { TABLES } = require('../utils/tablesNames');
 const { logError, logger } = require('../utils/logger');
 const { queryOne, executeQuery } = require('../config/database');

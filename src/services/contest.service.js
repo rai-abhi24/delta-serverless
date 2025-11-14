@@ -29,7 +29,7 @@ const validateMatchTiming = async (matchId) => {
 
                 return match;
             },
-            CACHE_EXPIRY.ONE_HOUR
+            CACHE_EXPIRY.ONE_DAY
         );
     } catch (error) {
         logError(error, { context: 'validateMatchTiming', matchId });
@@ -38,72 +38,96 @@ const validateMatchTiming = async (matchId) => {
 };
 
 /**
- * Get contests for a match with all necessary data
+ * Get contests for a match with max 3 contests per type
  */
-const getMatchContests = async (matchId, page = 1, limit = 10) => {
+const getMatchContestsByType = async (matchId) => {
     try {
         const cacheKey = CACHE_KEYS.CONTEST_CATALOG(matchId);
 
         return await cache.cacheAside(
             cacheKey,
             async () => {
-                const offset = (page - 1) * limit;
-
                 const query = `
-                    SELECT 
-                        cc.id as contest_id, cc.contest_type, cc.entry_fees, cc.mrp as max_fees, cc.total_spots, cc.filled_spot, 
-                        cc.fake_counter, cc.total_winning_prize, cc.first_prize, cc.winner_percentage,
-                        cc.prize_percentage, cc.usable_bonus, cc.bonus_contest, cc.is_flexible, cc.is_bte, cc.is_cancelled, 
-                        cc.cancellation, cc.sort_by, cc.extra_cash, cc.expert_id,
+                    WITH RankedContests AS (
+                        SELECT 
+                            cc.id as contest_id, 
+                            cc.contest_type, 
+                            cc.entry_fees, 
+                            cc.mrp as max_fees, 
+                            cc.total_spots, 
+                            cc.filled_spot, 
+                            cc.fake_counter, 
+                            cc.total_winning_prize, 
+                            cc.first_prize, 
+                            cc.winner_percentage,
+                            cc.prize_percentage, 
+                            cc.usable_bonus, 
+                            cc.bonus_contest, 
+                            cc.is_flexible, 
+                            cc.is_bte, 
+                            cc.is_cancelled, 
+                            cc.cancellation, 
+                            cc.sort_by, 
+                            cc.extra_cash, 
+                            cc.expert_id,
+                            
+                            -- Expert image if BTE contest
+                            CASE 
+                                WHEN cc.is_bte = 1 THEN fe.expert_image
+                                ELSE NULL
+                            END as expert_image,
+                            
+                            -- Contest type details
+                            ct.contest_type as contest_title,
+                            ct.description as contest_subtitle,
+                            ct.max_entries,
+                            ct.tnc_url,
+                            ct.inv_url,
+                            ct.free_wheel_count,
+                            
+                            -- Count total contests of this type
+                            (SELECT COUNT(*) 
+                             FROM ${TABLES.CREATE_CONTESTS} cc2
+                             WHERE cc2.match_id = '${matchId}'
+                             AND cc2.contest_type = cc.contest_type
+                             AND cc2.is_cancelled = 0
+                             AND cc2.is_private = 0
+                             AND cc2.filled_spot < cc2.total_spots
+                            ) as type_total_count,
+                            
+                            -- Row number per contest type for limiting
+                            ROW_NUMBER() OVER (
+                                PARTITION BY cc.contest_type 
+                                ORDER BY 
+                                    cc.sort_by ASC,
+                                    cc.filled_spot DESC,
+                                    cc.id ASC
+                            ) as type_rank
+                            
+                        FROM ${TABLES.CREATE_CONTESTS} cc
                         
-                        -- Expert image if BTE contest
-                        CASE 
-                            WHEN cc.is_bte = 1 THEN fe.expert_image
-                            ELSE NULL
-                        END as expert_image,
+                        INNER JOIN ${TABLES.CONTEST_TYPES} ct 
+                            ON cc.contest_type = ct.id
                         
-                        -- Contest type details
-                        ct.contest_type as contest_title,
-                        ct.description as contest_subtitle,
-                        ct.max_entries,
-                        ct.tnc_url,
-                        ct.inv_url,
-                        ct.free_wheel_count,
+                        LEFT JOIN ${TABLES.FANTASY_EXPERTS} fe
+                            ON cc.expert_id = fe.user_id AND cc.is_bte = 1
                         
-                        -- Count total contests of this type
-                        (SELECT COUNT(*) 
-                         FROM ${TABLES.CREATE_CONTESTS} cc2
-                         WHERE cc2.match_id = '${matchId}'
-                         AND cc2.contest_type = cc.contest_type
-                         AND cc2.is_cancelled = 0
-                         AND cc2.is_private = 0
-                         AND cc2.filled_spot < cc2.total_spots
-                        ) as type_total_count
-                        
-                    FROM ${TABLES.CREATE_CONTESTS} cc
-                    
-                    INNER JOIN ${TABLES.CONTEST_TYPES} ct 
-                        ON cc.contest_type = ct.id
-                    
-                    LEFT JOIN ${TABLES.FANTASY_EXPERTS} fe
-                        ON cc.expert_id = fe.user_id AND cc.is_bte = 1
-                    
-                    WHERE cc.match_id = '${matchId}'
-                    AND cc.is_cancelled = 0
-                    AND cc.is_private = 0
-                    AND cc.filled_spot < cc.total_spots
-                    
+                        WHERE cc.match_id = '${matchId}'
+                        AND cc.is_cancelled = 0
+                        AND cc.is_private = 0
+                        AND cc.filled_spot < cc.total_spots
+                    )
+                    SELECT * FROM RankedContests 
+                    WHERE type_rank <= 3
                     ORDER BY 
-                        cc.sort_by ASC,
-                        cc.filled_spot DESC
-                    
-                    LIMIT ${limit} OFFSET ${offset}
+                        contest_type ASC,
+                        type_rank ASC
                 `;
 
                 const contests = await queryAll(query);
 
-                const countResult = await queryOne(`
-                    SELECT COUNT(*) as total 
+                const typeCountResult = await queryOne(`
+                    SELECT COUNT(DISTINCT contest_type) as total_types
                     FROM ${TABLES.CREATE_CONTESTS}
                     WHERE match_id = ?
                     AND is_cancelled = 0
@@ -114,13 +138,13 @@ const getMatchContests = async (matchId, page = 1, limit = 10) => {
 
                 return {
                     contests,
-                    total: countResult?.total || 0
+                    total: typeCountResult?.total_types || 0
                 };
             },
             CACHE_EXPIRY.TWO_MINUTES
         );
     } catch (error) {
-        logError(error, { context: 'getMatchContests', matchId });
+        logError(error, { context: 'getMatchContestsByType', matchId });
         return { contests: [], total: 0 };
     }
 };
@@ -250,13 +274,6 @@ const transformContest = (contest, userJoinedData, userId) => {
         contestId: contest.contest_id,
         contest_type_id: contest.contest_type,
 
-        // Contest metadata
-        contestTitle: contest.contest_title,
-        contestSubTitle: contest.contest_subtitle,
-        tnc_url: contest.tnc_url,
-        inv_url: contest.inv_url,
-        free_wheel_count: contest.free_wheel_count,
-
         // Contest details
         entryFees: contest.entry_fees,
         max_fees: contest.max_fees,
@@ -274,7 +291,6 @@ const transformContest = (contest, userJoinedData, userId) => {
         // Flags
         bonus_contest: contest.bonus_contest === 1,
         is_flexible: contest.is_flexible === 1,
-        is_bte: contest.is_bte === 1,
         isCancelled: contest.is_cancelled === 1,
         cancellation: contest.cancellation === 1,
 
@@ -297,7 +313,7 @@ const transformContest = (contest, userJoinedData, userId) => {
 /**
  * Group contests by type and limit to top 3 per type
  */
-const groupAndLimitContests = (contests, userJoinedData, userId) => {
+const groupContestsByType = (contests, userJoinedData, userId) => {
     const grouped = {};
 
     contests.forEach(contest => {
@@ -308,25 +324,23 @@ const groupAndLimitContests = (contests, userJoinedData, userId) => {
                 contest_type_id: typeId,
                 contestTitle: contest.contest_title,
                 contestSubTitle: contest.contest_subtitle,
+                free_wheel_count: contest.free_wheel_count,
                 tnc_url: contest.tnc_url,
                 inv_url: contest.inv_url,
-                free_wheel_count: contest.free_wheel_count,
                 total_contest_count: contest.type_total_count,
                 is_bte: contest.is_bte,
                 is_flexible: contest.is_flexible,
+                totalWinningPrize: contest.total_winning_prize,
                 contests: []
             };
         }
 
-        // Limit to 3 contests per type
-        if (grouped[typeId].contests.length < 3) {
-            grouped[typeId].contests.push(
-                transformContest(contest, userJoinedData, userId)
-            );
-        }
+        grouped[typeId].contests.push(
+            transformContest(contest, userJoinedData, userId)
+        );
     });
 
-    return Object.values(grouped).sort((a, b) => a.contest_type_id - b.contest_type_id);
+    return Object.values(grouped).sort((a, b) => b.totalWinningPrize - a.totalWinningPrize);
 };
 
 /**
@@ -337,7 +351,7 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
     const startTime = Date.now();
 
     try {
-        const feedCacheKey = CACHE_KEYS.CONTEST_FEED(matchId, userId, page);
+        const feedCacheKey = CACHE_KEYS.CONTEST_FEED(matchId, page);
         const cached = await cache.get(feedCacheKey);
         if (cached) {
             logger.info('Contest feed served from cache', { matchId, userId, page });
@@ -371,15 +385,22 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
             userTeamCount,
             userContestCount
         ] = await Promise.all([
-            getMatchContests(matchId, page),
+            getMatchContestsByType(matchId),
             getUserJoinedContests(matchId, userId),
             getUserTeamCount(matchId, userId),
             getUserJoinedContestCount(matchId, userId)
         ]);
 
+        logger.info(`Contest feed generated ${JSON.stringify({
+            contests,
+            userJoinedData,
+            userTeamCount,
+            userContestCount
+        })}`);
 
-        const groupedContests = groupAndLimitContests(contests, userJoinedData, userId);
-        const totalPages = Math.ceil(total / 500);
+        const groupedContests = groupContestsByType(contests, userJoinedData, userId);
+        const contestsPerPage = 10;
+        const totalPages = Math.ceil(total / contestsPerPage);
 
         const result = {
             session_expired: false,
@@ -408,11 +429,11 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
 
         await cache.set(feedCacheKey, result, 30);
 
-        setImmediate(() => {
-            autoCreateContests(matchId).catch(err =>
-                logError(err, { context: 'autoCreateContests', matchId })
-            );
-        });
+        // setImmediate(() => {
+        //     autoCreateContests(matchId).catch(err =>
+        //         logError(err, { context: 'autoCreateContests', matchId })
+        //     );
+        // });
 
         logger.info('Contest feed generated', {
             matchId,
@@ -444,78 +465,98 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
  * Auto-create contests when they fill up
  * Runs asynchronously without blocking the response
  */
-const autoCreateContests = async (matchId) => {
-    try {
-        const filledContests = await queryAll(`
-            SELECT id, default_contest_id FROM ${TABLES.CREATE_CONTESTS}
-            WHERE match_id = ?
-            AND filled_spot = total_spots
-            AND cancellation = 1
-            AND is_cloned = 0
-            AND is_private = 0
-            AND total_spots > 0
-        `, [matchId]);
+// const autoCreateContests = async (matchId) => {
+//     try {
+//         const filledContests = await queryAll(`
+//             SELECT id, default_contest_id FROM ${TABLES.CREATE_CONTESTS}
+//             WHERE match_id = ?
+//             AND filled_spot = total_spots
+//             AND cancellation = 1
+//             AND is_cloned = 0
+//             AND is_private = 0
+//             AND total_spots > 0
+//         `, [matchId]);
 
-        if (filledContests.length === 0) {
-            return;
-        }
+//         if (filledContests.length === 0) {
+//             return;
+//         }
 
-        for (const contest of filledContests) {
-            const existingCount = await queryOne(`
-                SELECT COUNT(*) as count
-                FROM ${TABLES.CREATE_CONTESTS}
-                WHERE match_id = ?
-                AND default_contest_id = ?
-                AND filled_spot < total_spots
-            `, [matchId, contest.default_contest_id]);
+//         for (const contest of filledContests) {
+//             const existingCount = await queryOne(`
+//                 SELECT COUNT(*) as count
+//                 FROM ${TABLES.CREATE_CONTESTS}
+//                 WHERE match_id = ?
+//                 AND default_contest_id = ?
+//                 AND filled_spot < total_spots
+//             `, [matchId, contest.default_contest_id]);
 
-            if (existingCount.count === 0) {
-                await queryOne(`
-                    UPDATE ${TABLES.CREATE_CONTESTS} 
-                    SET is_cloned = 1 
-                    WHERE id = ?`,
-                    [contest.id]
-                );
+//             if (existingCount.count === 0) {
+//                 await queryOne(`
+//                     UPDATE ${TABLES.CREATE_CONTESTS} 
+//                     SET is_cloned = 1 
+//                     WHERE id = ?`,
+//                     [contest.id]
+//                 );
 
-                // await queryOne(`
-                //     INSERT INTO ${TABLES.CREATE_CONTESTS} (
-                //         match_id, default_contest_id, contest_type,
-                //         entry_fees, total_spots, filled_spot,
-                //         total_winning_prize, first_prize,
-                //         winner_percentage, winner_count,
-                //         usable_bonus, bonus_contest, cancellation,
-                //         sort_by, is_cloned, is_full, is_free
-                //     ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
-                // `, [
-                //     contest.match_id,
-                //     contest.default_contest_id,
-                //     contest.contest_type,
-                //     contest.entry_fees,
-                //     contest.total_spots,
-                //     contest.total_winning_prize,
-                //     contest.first_prize,
-                //     contest.winner_percentage,
-                //     contest.winner_count,
-                //     contest.usable_bonus,
-                //     contest.bonus_contest,
-                //     contest.cancellation,
-                //     contest.sort_by
-                // ]);
+//                 await queryOne(`
+//                     INSERT INTO ${TABLES.CREATE_CONTESTS} (
+//                         contest_type, 
+//                         entry_fees, 
+//                         mrp as max_fees, 
+//                         total_spots, 
+//                         filled_spot, 
+//                         fake_counter, 
+//                         total_winning_prize, 
+//                         first_prize, 
+//                         winner_percentage,
+//                         prize_percentage, 
+//                         usable_bonus, 
+//                         bonus_contest, 
+//                         is_flexible, 
+//                         is_bte, 
+//                         is_cancelled, 
+//                         cancellation, 
+//                         sort_by, 
+//                         extra_cash, 
+//                         expert_id,
+//                         is_cloned
+//                     ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
+//                 `, [
+//                     contest.contest_type,
+//                     contest.entry_fees,
+//                     contest.max_fees,
+//                     contest.match_id,
+//                     contest.total_spots,
+//                     contest.filled_spot,
+//                     contest.fake_counter,
+//                     contest.total_winning_prize,
+//                     contest.first_prize,
+//                     contest.winner_percentage,
+//                     contest.prize_percentage,
+//                     contest.usable_bonus,
+//                     contest.bonus_contest,
+//                     contest.is_flexible,
+//                     contest.is_bte,
+//                     contest.is_cancelled,
+//                     contest.cancellation,
+//                     contest.sort_by,
+//                     contest.extra_cash,
+//                     contest.expert_id
+//                 ]);
+//                 logger.info('Auto-created contest', {
+//                     matchId,
+//                     originalContestId: contest.id
+//                 });
+//             }
+//         }
 
-                // logger.info('Auto-created contest', {
-                //     matchId,
-                //     originalContestId: contest.id
-                // });
-            }
-        }
+//         // Clear contest cache after auto-creation
+//         await cache.del(CACHE_KEYS.CONTEST_CATALOG(matchId));
 
-        // Clear contest cache after auto-creation
-        await cache.del(CACHE_KEYS.CONTEST_CATALOG(matchId));
-
-    } catch (error) {
-        logError(error, { context: 'autoCreateContests', matchId });
-    }
-};
+//     } catch (error) {
+//         logError(error, { context: 'autoCreateContests', matchId });
+//     }
+// };
 
 module.exports = {
     getContestsByMatch

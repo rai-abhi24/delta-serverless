@@ -34,10 +34,10 @@ const config = {
             if (times > 3) return null;
             return Math.min(times * 200, 2000);
         },
-        tls: process.env.REDIS_TLS === 'true' ? {
+        tls: process.env.NODE_ENV === 'production' && process.env.REDIS_TLS === 'true' ? {
             checkServerIdentity: () => undefined,
             rejectUnauthorized: true
-        } : undefined,
+        } : false,
         enableReadyCheck: true,
         enableOfflineQueue: true,
         lazyConnect: false,

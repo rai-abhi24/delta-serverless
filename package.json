@@ -4,6 +4,7 @@
   "description": "High-performance serverless backend for Delta 11 app",
   "main": "src/handlers/apkUpdate.handler.js",
   "scripts": {
+    "dev": "node --watch src/dev.js",
     "offline": "serverless offline",
     "deploy": "serverless deploy",
     "deploy:prod": "serverless deploy --stage prod",

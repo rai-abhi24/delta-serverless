@@ -304,7 +304,7 @@ const mset = async (keyValuePairs, ttl = 300) => {
         const redis = await getRedisClient();
         if (!redis) return false;
 
-        const pipeline = redis.Pipeline();
+        const pipeline = redis.pipeline();
 
         for (const [key, value] of Object.entries(keyValuePairs)) {
             const serialized = JSON.stringify(value);
@@ -357,12 +357,13 @@ const delPattern = async (pattern) => {
         const redis = await getRedisClient();
         if (!redis) return false;
 
-        const stream = redis.ScanStream({
+        const stream = redis.scanStream({
             match: pattern,
             count: 100
         });
 
-        const pipeline = redis.Pipeline();
+        // CORRECTED: Use pipeline() method instead of Pipeline constructor
+        const pipeline = redis.pipeline();
         let count = 0;
 
         stream.on('data', (keys) => {
