@@ -161,3 +161,51 @@ exports.deviceNotificationSchema = {
         }
     }
 };
+
+exports.getMyContestSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['match_id', 'user_id'],
+            properties: {
+                match_id: { type: 'string' },
+                user_id: { type: 'string' },
+                deviceDetails: {
+                    type: 'object',
+                    properties: {
+                        versionCode: {
+                            type: 'number'
+                        }
+                    }
+                }
+            },
+            additionalProperties: false
+        }
+    }
+};
+
+exports.getMyTeamSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['match_id', 'user_id'],
+            properties: {
+                match_id: { type: 'string' },
+                user_id: { type: 'string' },
+                type: {
+                    type: 'string',
+                    enum: ['close', 'open']
+                },
+                close_team_id: {
+                    type: 'array',
+                    items: { type: 'number' }
+                },
+                open_team_id: {
+                    type: 'array',
+                    items: { type: 'number' }
+                }
+            },
+            additionalProperties: false
+        }
+    }
+};

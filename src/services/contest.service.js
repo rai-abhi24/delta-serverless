@@ -4,8 +4,8 @@
 
 const config = require('../config');
 const cache = require('../utils/cache');
-const { CACHE_KEYS, CACHE_EXPIRY } = require('../utils/constants');
-const { queryAll, queryOne } = require('../config/database');
+const { CACHE_KEYS, CACHE_EXPIRY, MATCH_STATUS } = require('../utils/constants');
+const { queryAll, queryOne, executeTransaction } = require('../config/database');
 const { logError, logger } = require('../utils/logger');
 const { TABLES } = require('../utils/tablesNames');
 
@@ -290,9 +290,9 @@ const transformContest = (contest, userJoinedData, userId) => {
 
         // Flags
         bonus_contest: contest.bonus_contest === 1,
-        is_flexible: contest.is_flexible === 1,
+        is_flexible: contest.is_flexible,
         isCancelled: contest.is_cancelled === 1,
-        cancellation: contest.cancellation === 1,
+        cancellation: contest.cancellation === "1",
 
         // Additional fields
         sort_by: contest.sort_by,
@@ -461,103 +461,375 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
     }
 };
 
+/* --------------------- Get My Contests --------------------- */
+
 /**
- * Auto-create contests when they fill up
- * Runs asynchronously without blocking the response
+ * Process pending join contests (non-blocking)
  */
-// const autoCreateContests = async (matchId) => {
-//     try {
-//         const filledContests = await queryAll(`
-//             SELECT id, default_contest_id FROM ${TABLES.CREATE_CONTESTS}
-//             WHERE match_id = ?
-//             AND filled_spot = total_spots
-//             AND cancellation = 1
-//             AND is_cloned = 0
-//             AND is_private = 0
-//             AND total_spots > 0
-//         `, [matchId]);
+const processPendingContests = async (matchId, userId, contestId = null) => {
+    try {
+        await executeTransaction(async (connection) => {
+            const query = `
+                SELECT * FROM ${TABLES.PENDING_JOIN_CONTESTS}
+                WHERE match_id = ? AND user_id = ?
+                ${contestId ? 'AND contest_id = ?' : ''}
+                AND status = 0
+                FOR UPDATE
+            `;
+            const params = contestId ? [matchId, userId, contestId] : [matchId, userId];
 
-//         if (filledContests.length === 0) {
-//             return;
-//         }
+            const [jobs] = await connection.execute(query, params);
 
-//         for (const contest of filledContests) {
-//             const existingCount = await queryOne(`
-//                 SELECT COUNT(*) as count
-//                 FROM ${TABLES.CREATE_CONTESTS}
-//                 WHERE match_id = ?
-//                 AND default_contest_id = ?
-//                 AND filled_spot < total_spots
-//             `, [matchId, contest.default_contest_id]);
+            if (jobs.length === 0) return;
 
-//             if (existingCount.count === 0) {
-//                 await queryOne(`
-//                     UPDATE ${TABLES.CREATE_CONTESTS} 
-//                     SET is_cloned = 1 
-//                     WHERE id = ?`,
-//                     [contest.id]
-//                 );
+            for (const job of jobs) {
+                await connection.execute(
+                    `UPDATE ${TABLES.PENDING_JOIN_CONTESTS} SET status = 1 WHERE id = ?`,
+                    [job.id]
+                );
 
-//                 await queryOne(`
-//                     INSERT INTO ${TABLES.CREATE_CONTESTS} (
-//                         contest_type, 
-//                         entry_fees, 
-//                         mrp as max_fees, 
-//                         total_spots, 
-//                         filled_spot, 
-//                         fake_counter, 
-//                         total_winning_prize, 
-//                         first_prize, 
-//                         winner_percentage,
-//                         prize_percentage, 
-//                         usable_bonus, 
-//                         bonus_contest, 
-//                         is_flexible, 
-//                         is_bte, 
-//                         is_cancelled, 
-//                         cancellation, 
-//                         sort_by, 
-//                         extra_cash, 
-//                         expert_id,
-//                         is_cloned
-//                     ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
-//                 `, [
-//                     contest.contest_type,
-//                     contest.entry_fees,
-//                     contest.max_fees,
-//                     contest.match_id,
-//                     contest.total_spots,
-//                     contest.filled_spot,
-//                     contest.fake_counter,
-//                     contest.total_winning_prize,
-//                     contest.first_prize,
-//                     contest.winner_percentage,
-//                     contest.prize_percentage,
-//                     contest.usable_bonus,
-//                     contest.bonus_contest,
-//                     contest.is_flexible,
-//                     contest.is_bte,
-//                     contest.is_cancelled,
-//                     contest.cancellation,
-//                     contest.sort_by,
-//                     contest.extra_cash,
-//                     contest.expert_id
-//                 ]);
-//                 logger.info('Auto-created contest', {
-//                     matchId,
-//                     originalContestId: contest.id
-//                 });
-//             }
-//         }
+                const payload = JSON.parse(job.payload);
 
-//         // Clear contest cache after auto-creation
-//         await cache.del(CACHE_KEYS.CONTEST_CATALOG(matchId));
+                if (payload.updateStatementsEXT?.length) {
+                    await connection.query(
+                        `INSERT INTO ${TABLES.WALLET_TRANSACTIONS} 
+                        (user_id, match_id, contest_id, amount, type, created_at, updated_at) VALUES ?`,
+                        [payload.updateStatementsEXT.map(s => Object.values(s))]
+                    );
+                }
 
-//     } catch (error) {
-//         logError(error, { context: 'autoCreateContests', matchId });
-//     }
-// };
+                if (payload.updateStatementsWTD?.length) {
+                    await connection.query(
+                        `INSERT INTO ${TABLES.WALLET_TRANSACTIONS} 
+                        (user_id, match_id, contest_id, amount, type, created_at, updated_at) VALUES ?`,
+                        [payload.updateStatementsWTD.map(s => Object.values(s))]
+                    );
+                }
+
+                if (payload.updateStatementsBonus?.length) {
+                    await connection.query(
+                        `INSERT INTO ${TABLES.WALLET_TRANSACTIONS} 
+                        (user_id, match_id, contest_id, amount, type, created_at, updated_at) VALUES ?`,
+                        [payload.updateStatementsBonus.map(s => Object.values(s))]
+                    );
+                }
+
+                if (payload.joinContestStatement?.length) {
+                    await connection.query(
+                        `INSERT INTO ${TABLES.JOIN_CONTESTS} 
+                        (user_id, match_id, contest_id, created_team_id, team_count, team_name, entry_fees, points, ranks, created_at, updated_at) VALUES ?`,
+                        [payload.joinContestStatement.map(s => Object.values(s))]
+                    );
+                }
+            }
+        });
+
+        await Promise.all([
+            cache.del(CACHE_KEYS.USER_CONTESTS(matchId, userId)),
+            cache.del(CACHE_KEYS.USER_TEAMS(matchId, userId))
+        ]);
+    } catch (error) {
+        logError(error, { context: 'processPendingContests', matchId, userId, contestId });
+    }
+};
+
+/**
+ * Get user's joined contests with teams
+ */
+const getMyJoinedContestsWithTeams = async (matchId, userId) => {
+    try {
+        const cacheKey = CACHE_KEYS.MY_CONTESTS(matchId, userId);
+
+        return await cache.cacheAside(
+            cacheKey,
+            async () => {
+                const query = `
+                    SELECT 
+                        jc.id as join_id,
+                        jc.contest_id,
+                        jc.created_team_id,
+                        jc.team_count,
+                        jc.team_name,
+                        jc.points,
+                        jc.ranks as 'rank',
+                        jc.winning_amount,
+                        jc.cancel_contest,
+                        
+                        cc.entry_fees,
+                        cc.total_spots,
+                        cc.filled_spot,
+                        cc.fake_counter,
+                        cc.total_winning_prize,
+                        cc.first_prize,
+                        cc.winner_percentage,
+                        cc.prize_percentage,
+                        cc.usable_bonus,
+                        cc.bonus_contest,
+                        cc.is_flexible,
+                        cc.is_bte,
+                        cc.is_cancelled,
+                        cc.cancellation,
+                        cc.is_private,
+                        cc.created_by_user,
+                        cc.coupon_code,
+                        cc.is_gadget_based,
+                        cc.extra_cash,
+                        cc.expert_id,
+                        cc.mrp as max_fees,
+                        cc.sort_by,
+                        cc.contest_title,
+                        
+                        ct.contest_type,
+                        ct.description as contest_subtitle,
+                        ct.max_entries,
+                        ct.tnc_url,
+                        ct.inv_url,
+                        ct.free_wheel_count,
+                        
+                        u.name as user_name,
+                        
+                        CASE 
+                            WHEN cc.is_bte = 1 THEN fe.expert_image
+                            ELSE NULL
+                        END as expert_image,
+                        
+                        -- Get all teams for this contest in one go
+                        (SELECT JSON_ARRAYAGG(
+                            JSON_OBJECT(
+                                'team_name', CONCAT(COALESCE(jc2.team_name, u.name), '(', jc2.team_count, ')'),
+                                'createdTeamId', jc2.created_team_id,
+                                'contestId', jc2.contest_id,
+                                'isWinning', false,
+                                'rank', COALESCE(jc2.ranks),
+                                'points', jc2.points,
+                                'prize_amount', IF(jc2.cancel_contest = 1, 0, COALESCE(jc2.winning_amount, 0))
+                            )
+                        )
+                        FROM ${TABLES.JOIN_CONTESTS} jc2
+                        WHERE jc2.contest_id = cc.id 
+                        AND jc2.user_id = jc.user_id
+                        AND jc2.match_id = jc.match_id
+                        ORDER BY jc2.ranks ASC
+                        ) as joined_teams
+                        
+                    FROM ${TABLES.JOIN_CONTESTS} jc
+                    
+                    INNER JOIN ${TABLES.CREATE_CONTESTS} cc 
+                        ON jc.contest_id = cc.id
+                    
+                    INNER JOIN ${TABLES.CONTEST_TYPES} ct 
+                        ON cc.contest_type = ct.id
+                    
+                    LEFT JOIN ${TABLES.USERS} u 
+                        ON jc.user_id = u.id
+                    
+                    LEFT JOIN ${TABLES.FANTASY_EXPERTS} fe 
+                        ON cc.expert_id = fe.user_id AND cc.is_bte = 1
+                    
+                    WHERE jc.match_id = ? 
+                    AND jc.user_id = ?
+                    
+                    GROUP BY jc.contest_id
+                    ORDER BY cc.sort_by ASC
+                `;
+
+                const contests = await queryAll(query, [matchId, userId]);
+                return contests;
+            },
+            CACHE_EXPIRY.FIVE_MINUTES
+        );
+    } catch (error) {
+        logError(error, { context: 'getMyJoinedContestsWithTeams', matchId, userId });
+        return [];
+    }
+};
+
+/**
+ * Transform contest data
+ */
+const transformMyContest = (contest, userId) => {
+    logger.info({
+        message: 'transformMyContest',
+        data: { joined_teams: contest.joined_teams, userId }
+    })
+    const baseUrl = config.app.baseUrl || 'https://panel.onex11.com';
+
+    // Calculate filled spots
+    let filledSpots = contest.filled_spot;
+    if (contest.total_spots > 500 || contest.is_bte === 1) {
+        filledSpots += (contest.fake_counter || 0);
+    }
+
+    // Calculate dynamic prize for flexible contests
+    let totalWinningPrize = contest.total_winning_prize;
+    let firstPrice = contest.first_prize;
+
+    if (contest.total_spots === 0) {
+        const twp = Math.round(contest.filled_spot * contest.entry_fees * 0.7);
+        totalWinningPrize = twp;
+        firstPrice = twp;
+    }
+
+    // Parse joined teams JSON
+    let joinedTeams = [];
+    try {
+        joinedTeams = contest.joined_teams ? JSON.parse(contest.joined_teams) : [];
+    } catch (e) {
+        logError(e, { context: 'parseJoinedTeams', contestId: contest.contest_id });
+    }
+
+    const isPrivateCreator = contest.is_private === 1 && contest.created_by_user === userId;
+
+    return {
+        contestId: contest.contest_id,
+        contest_type_id: contest.contest_type,
+
+        // Contest metadata
+        contestTitle: contest.is_private === 1 ? contest.contest_title : contest.contest_type,
+        contestSubTitle: contest.contest_subtitle,
+        tnc_url: contest.tnc_url,
+        inv_url: contest.inv_url,
+        free_wheel_count: contest.free_wheel_count,
+
+        // Contest details
+        entryFees: contest.entry_fees,
+        max_fees: contest.max_fees,
+        totalSpots: contest.total_spots,
+        filled_spot: filledSpots,
+        filledSpots,
+        totalWinningPrize,
+        firstPrice,
+
+        // Contest properties
+        winnerPercentage: contest.winner_percentage,
+        winnerCount: contest.winner_count || contest.prize_percentage,
+        maxAllowedTeam: contest.max_entries,
+        maxEntries: contest.max_entries,
+        usable_bonus: contest.usable_bonus,
+
+        // Flags
+        bonus_contest: contest.bonus_contest === 1,
+        is_flexible: contest.is_flexible === 1,
+        is_bte: contest.is_bte === 1,
+        is_public: 0,
+        is_private: contest.is_private,
+        is_private_creater: isPrivateCreator ? 1 : 0,
+        private_contest_code: contest.coupon_code,
+        is_gadget_based: contest.is_gadget_based,
+        isCancelled: contest.is_cancelled === 1,
+        cancellation: contest.cancellation === 1,
+
+        // Additional fields
+        sort_by: contest.sort_by,
+        extra_cash: contest.extra_cash,
+
+        // Teams
+        no_of_users_team: joinedTeams.length,
+        joinedTeams,
+
+        // Expert data
+        ...(contest.is_bte === 1 && contest.expert_image && {
+            expert_image: contest.expert_image.startsWith('http')
+                ? contest.expert_image
+                : `${baseUrl}/${contest.expert_image}`
+        })
+    };
+};
+
+/**
+ * Main function: Get My Contests
+ */
+const getMyContests = async (matchId, userId, versionCode = null) => {
+    const startTime = Date.now();
+
+    try {
+        const match = await validateMatchTiming(matchId);
+
+        if (!match) {
+            return {
+                system_time: Math.floor(Date.now() / 1000),
+                status: false,
+                code: 201,
+                message: 'match id is invalid'
+            };
+        }
+
+        if (match.status !== 2) {
+            setImmediate(() => {
+                processPendingContests(matchId, userId).catch(err =>
+                    logError(err, { context: 'processPendingContests', matchId, userId })
+                );
+            });
+        }
+
+        let cacheTTL;
+        if (match.status === MATCH_STATUS.COMPLETED || match.status === MATCH_STATUS.ABANDONED) {
+            cacheTTL = CACHE_EXPIRY.ONE_DAY;
+        } else if (match.status === MATCH_STATUS.LIVE) {
+            cacheTTL = 45;
+        } else {
+            cacheTTL = 5;
+        }
+
+        const feedCacheKey = CACHE_KEYS.MY_CONTESTS(matchId, userId);
+
+        return await cache.cacheAside(
+            feedCacheKey,
+            async () => {
+                const contests = await getMyJoinedContestsWithTeams(matchId, userId);
+
+                // Filter out bonus contests for old versions
+                const filteredContests = versionCode === null
+                    ? contests.filter(c => !c.bonus_contest)
+                    : contests;
+
+                const transformedContests = filteredContests.map(c => transformMyContest(c, userId));
+
+                const result = {
+                    system_time: Math.floor(Date.now() / 1000),
+                    match_status: match.status_str,
+                    match_time: match.timestamp_start,
+                    status: true,
+                    code: 200,
+                    message: 'Success',
+                    response: {
+                        my_joined_contest: transformedContests
+                    },
+                    _meta: {
+                        processing_time_ms: Date.now() - startTime,
+                        version: 'v2'
+                    }
+                };
+
+                logger.info('My contests generated', {
+                    matchId,
+                    userId,
+                    contestCount: transformedContests.length,
+                    duration: Date.now() - startTime
+                });
+
+                return result;
+            },
+            cacheTTL
+        );
+
+    } catch (error) {
+        logError(error, { context: 'getMyContests', matchId, userId });
+
+        return {
+            system_time: Math.floor(Date.now() / 1000),
+            status: false,
+            code: 500,
+            message: 'Failed to fetch my contests',
+            _meta: {
+                processing_time_ms: Date.now() - startTime,
+                error: true
+            }
+        };
+    }
+};
 
 module.exports = {
-    getContestsByMatch
+    getContestsByMatch,
+    getMyContests,
 };

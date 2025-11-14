@@ -62,6 +62,7 @@ module.exports = {
         USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
         CONTEST_FEED: (matchId, page) => `feed:cont:${matchId}:p${page}`,
         CONTEST_TYPES: () => `meta:cont:types`,
+        MY_CONTESTS: (matchId, userId) => `feed:usr:mycon:${matchId}:${userId}`,
 
         USER_TOKEN: (hashedToken) => `token:${hashedToken}`,
         USER_BY_MOBILE: (mobileNumber) => `user:mobile:${mobileNumber}`,
@@ -74,6 +75,10 @@ module.exports = {
         REFERRAL_COUNT: (userId) => `ref:cnt:${userId}`,
         ACCOUNT_VERIFICATION: (userId) => `acc:ver:${userId}`,
         PAYMENT_GATEWAYS: (platform) => `pay:gtw:${platform}`,
+
+        MY_TEAMS: (matchId, userId) => `usr:myteam:${matchId}:${userId}`,
+        MATCH_SQUAD: (matchId) => `meta:squad:${matchId}`,
+        PLAYER_IMAGE: (playerId) => `img:plyr:${playerId}`,
     },
 
     CACHE_EXPIRY: {

@@ -4,9 +4,10 @@ const { authenticate } = require('../../middlewares/auth.middleware');
 const { bannerHandler } = require('../../handlers/banner.handler');
 const { getMatchHandler, getMatchHistoryHandler } = require('../../handlers/match.handler');
 const { apkUpdateHandler, getStoriesHandler, getRecentWinnersHandler, deviceNotificationHandler } = require('../../handlers/basic.handler');
-const { getContestByMatchHandler } = require('../../handlers/contest.handler');
+const { getContestByMatchHandler, getMyContestHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 const { getWalletHandler } = require('../../handlers/wallet.handler');
+const { getMyTeamHandler } = require('../../handlers/team.handler');
 
 module.exports = async (app) => {
     /* Auth routes */
@@ -59,6 +60,17 @@ module.exports = async (app) => {
         schema: schemas.getContestByMatchSchema
     }, getContestByMatchHandler);
 
+    app.post("/getMyContest", {
+        preHandler: authenticate,
+        schema: schemas.getMyContestSchema
+    }, getMyContestHandler);
+
+    /* Team routes */
+    app.post("/getMyTeam", {
+        preHandler: authenticate,
+        schema: schemas.getMyTeamSchema
+    }, getMyTeamHandler);
+
     /* Wallet routes */
     app.post("/getWallet", {
         preHandler: authenticate,
@@ -95,4 +107,24 @@ module.exports = async (app) => {
             "data": ""
         });
     });
+
+    app.post("/getExpertGuruTeams", {
+        preHandler: authenticate,
+        schema: schemas.getWalletSchema
+    },
+        async (_request, reply) => {
+            return reply.send({
+                "system_time": Math.floor(Date.now() / 1000),
+                "match_status": null,
+                "match_time": null,
+                "status": true,
+                "code": 200,
+                "teamCount": 0,
+                "message": "success",
+                "response": {
+                    "myteam": []
+                }
+            });
+        }
+    );
 };
