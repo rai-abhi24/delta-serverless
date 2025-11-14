@@ -12,6 +12,7 @@ const { default: fastifyCompress } = require("@fastify/compress");
 const { logRequest, logResponse, logger } = require("./utils/logger");
 const awsLambdaFastify = require('@fastify/aws-lambda');
 const v1Routes = require("./routes/v1");
+const config = require("./config");
 
 const app = fastify({
     logger: false,
@@ -41,6 +42,33 @@ app.register(fastifyCompress, {
 app.addHook('preHandler', async (request) => {
     request.startTime = Date.now();
     logRequest(request);
+});
+
+app.addHook('onSend', async (request, reply, payload) => {
+    if (process.env.LOG_RESPONSES === 'true' || !config.isProduction) {
+        try {
+            const responseBody = typeof payload === 'string'
+                ? JSON.parse(payload)
+                : payload;
+
+            logger.info({
+                type: 'response_payload',
+                method: request.method,
+                url: request.url,
+                statusCode: reply.statusCode,
+                requestId: request.id,
+                duration: Date.now() - request.startTime,
+                request: {
+                    body: request.body,
+                    query: request.query,
+                },
+                response: responseBody,
+            }, 'API Response Sent');
+        } catch (err) {
+        }
+    }
+
+    return payload;
 });
 
 app.addHook('onResponse', async (request, reply) => {

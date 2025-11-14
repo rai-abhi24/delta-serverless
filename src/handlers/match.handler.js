@@ -35,7 +35,7 @@ exports.getMatchHistoryHandler = async (request, reply) => {
     try {
         const page = request.query.page || 1;
         const { action_type } = request.body;
-        const { user_id } = request?.user || {};
+        const { id: user_id } = request?.user || {};
 
         if (!user_id) {
             return unauthorized(reply);
