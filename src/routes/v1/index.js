@@ -4,7 +4,7 @@ const { authenticate } = require('../../middlewares/auth.middleware');
 const { bannerHandler } = require('../../handlers/banner.handler');
 const { getMatchHandler, getMatchHistoryHandler } = require('../../handlers/match.handler');
 const { apkUpdateHandler, getStoriesHandler, getRecentWinnersHandler, deviceNotificationHandler } = require('../../handlers/basic.handler');
-const { getContestByMatchHandler, getMyContestHandler } = require('../../handlers/contest.handler');
+const { getContestByMatchHandler, getMyContestHandler, getAllContestByMatchHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 const { getWalletHandler } = require('../../handlers/wallet.handler');
 const { getMyTeamHandler } = require('../../handlers/team.handler');
@@ -59,6 +59,10 @@ module.exports = async (app) => {
         preHandler: authenticate,
         schema: schemas.getContestByMatchSchema
     }, getContestByMatchHandler);
+
+    app.post("/getAllContestByMatch", {
+        schema: schemas.getContestByMatchSchema
+    }, getAllContestByMatchHandler);
 
     app.post("/getMyContest", {
         preHandler: authenticate,

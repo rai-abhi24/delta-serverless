@@ -6,7 +6,7 @@
 const pino = require('pino');
 const config = require('../config');
 
-const logger = pino({
+const loggerOptions = {
     level: config.logging.level,
     formatters: {
         level: (label) => ({ level: label }),
@@ -17,17 +17,24 @@ const logger = pino({
         service: 'delta11-serverless',
         env: config.env,
     },
-    ...(config.logging.pretty && {
-        transport: {
-            target: 'pino-pretty',
-            options: {
-                colorize: true,
-                translateTime: 'SYS:standard',
-                ignore: 'pid,hostname',
-            },
+};
+
+if (config.isDevelopment && config.logging.pretty) {
+    loggerOptions.transport = {
+        target: 'pino-pretty',
+        options: {
+            colorize: true,
+            colorizeObjects: true,
+            translateTime: 'HH:MM:ss.l',
+            ignore: 'service,env',
+            messageFormat: '{msg}',
+            levelFirst: true,
+            singleLine: true,
         },
-    }),
-});
+    };
+}
+
+const logger = pino(loggerOptions);
 
 /**
  * Create a child logger with additional context

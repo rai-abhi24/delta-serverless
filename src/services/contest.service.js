@@ -242,13 +242,11 @@ const getUserJoinedContestCount = async (matchId, userId) => {
  * Transform contest data with calculations
  */
 const transformContest = (contest, userJoinedData, userId) => {
-    // Calculate filled spots (add fake counter for large contests)
     let filledSpots = contest.filled_spot;
     if (contest.total_spots > 500 || contest.is_bte === 1) {
         filledSpots += (contest.fake_counter || 0);
     }
 
-    // Calculate dynamic prize for flexible contests
     let totalWinningPrize = contest.total_winning_prize;
     let firstPrize = contest.first_prize;
 
@@ -259,11 +257,9 @@ const transformContest = (contest, userJoinedData, userId) => {
 
         if (totalWinningPrize < contest.entry_fees) {
             firstPrize = contest.entry_fees;
-            if (contest.filled_spot > 1) {
-                totalWinningPrize = contest.entry_fees * (contest.filled_spot - 1);
-            } else {
-                totalWinningPrize = contest.entry_fees;
-            }
+            totalWinningPrize = contest.filled_spot > 1
+                ? contest.entry_fees * (contest.filled_spot - 1)
+                : contest.entry_fees;
         }
     }
 
@@ -281,27 +277,19 @@ const transformContest = (contest, userJoinedData, userId) => {
         filled_spot: filledSpots,
         totalWinningPrize,
         firstPrice: firstPrize,
-
-        // Contest properties
         winnerPercentage: contest.winner_percentage,
         winnerCount: contest.winner_count || contest.prize_percentage,
         maxAllowedTeam: contest.max_entries,
         usable_bonus: contest.usable_bonus,
-
-        // Flags
         bonus_contest: contest.bonus_contest === 1,
         is_flexible: contest.is_flexible,
+        is_bte: contest.is_bte === 1,
         isCancelled: contest.is_cancelled === 1,
         cancellation: contest.cancellation === "1",
-
-        // Additional fields
+        is_gadget_based: contest.is_gadget_based === 1,
         sort_by: contest.sort_by,
         extra_cash: contest.extra_cash,
-
-        // User-specific data
         no_of_users_team: isUserExpert ? 1 : userJoined.count,
-
-        // Expert data (for BTE contests)
         ...(contest.is_bte === 1 && contest.expert_image && {
             expert_image: contest.expert_image.startsWith('http')
                 ? contest.expert_image
@@ -457,6 +445,139 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
                 processing_time_ms: Date.now() - startTime,
                 error: true
             }
+        };
+    }
+};
+
+/* ---------------- Get All Contests By Match ---------------- */
+
+const getMatchContests = async (matchId, page = 1, limit = 500) => {
+    try {
+        const offset = (page - 1) * limit;
+
+        const query = `
+            SELECT 
+                cc.id as contest_id, cc.contest_type, cc.entry_fees, cc.mrp as max_fees, 
+                cc.total_spots, cc.filled_spot, cc.fake_counter, cc.total_winning_prize, 
+                cc.first_prize, cc.winner_percentage, cc.prize_percentage, 
+                cc.usable_bonus, cc.bonus_contest, cc.is_flexible, cc.is_bte, cc.is_cancelled, 
+                cc.cancellation, cc.sort_by, cc.extra_cash, cc.expert_id, cc.is_gadget_based,
+                
+                CASE 
+                    WHEN cc.is_bte = 1 THEN fe.expert_image
+                    ELSE NULL
+                END as expert_image,
+                
+                ct.contest_type as contest_title,
+                ct.description as contest_subtitle,
+                ct.max_entries,
+                ct.tnc_url,
+                ct.inv_url,
+                ct.free_wheel_count
+                
+            FROM ${TABLES.CREATE_CONTESTS} cc
+            
+            INNER JOIN ${TABLES.CONTEST_TYPES} ct 
+                ON cc.contest_type = ct.id
+            
+            LEFT JOIN ${TABLES.FANTASY_EXPERTS} fe
+                ON cc.expert_id = fe.user_id AND cc.is_bte = 1
+            
+            WHERE cc.match_id = '${matchId}'
+            AND cc.is_cancelled = 0
+            AND cc.is_private = 0
+            AND cc.filled_spot < cc.total_spots
+            AND cc.deleted_at IS NULL
+            
+            ORDER BY cc.sort_by ASC, cc.entry_fees DESC
+            
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        const contests = await queryAll(query);
+
+        const countResult = await queryOne(`
+            SELECT COUNT(*) as total 
+            FROM ${TABLES.CREATE_CONTESTS}
+            WHERE match_id = ?
+            AND is_cancelled = 0
+            AND is_private = 0
+            AND filled_spot < total_spots
+            AND deleted_at IS NULL`,
+            [matchId]
+        );
+
+        return {
+            contests,
+            total: countResult?.total || 0
+        };
+    } catch (error) {
+        logError(error, { context: 'getMatchContests', matchId });
+        return { contests: [], total: 0 };
+    }
+};
+
+const getAllContestsByMatch = async (matchId, userId, page = 1) => {
+    try {
+        const perPage = 10;
+        const match = await validateMatchTiming(matchId);
+
+        if (!match) {
+            return {
+                system_time: Math.floor(Date.now() / 1000),
+                status: false,
+                code: 201,
+                message: 'Match id is invalid'
+            };
+        }
+
+        const currentTime = Math.floor(Date.now() / 1000);
+        if (currentTime > match.timestamp_start) {
+            return {
+                system_time: currentTime,
+                status: false,
+                code: 201,
+                message: 'Match time up'
+            };
+        }
+
+        const [
+            { contests, total },
+            userJoinedData
+        ] = await Promise.all([
+            getMatchContests(matchId, page, perPage),
+            getUserJoinedContests(matchId, userId)
+        ]);
+
+        const transformedContests = contests.map(contest =>
+            transformContest(contest, userJoinedData, userId)
+        );
+
+        const totalPages = Math.ceil(total / perPage);
+
+        return {
+            session_expired: false,
+            system_time: currentTime,
+            match_status: match.status_str,
+            match_time: match.timestamp_start,
+            status: true,
+            code: 200,
+            message: 'Success',
+            response: {
+                matchcontests: transformedContests
+            },
+            pagination: {
+                current_page: page,
+                total_pages: totalPages
+            }
+        };
+    } catch (error) {
+        logError(error, { context: 'getAllContestsByMatch', matchId, userId });
+        return {
+            system_time: Math.floor(Date.now() / 1000),
+            status: false,
+            code: 500,
+            message: 'Failed to fetch contests'
         };
     }
 };
@@ -831,5 +952,6 @@ const getMyContests = async (matchId, userId, versionCode = null) => {
 
 module.exports = {
     getContestsByMatch,
+    getAllContestsByMatch,
     getMyContests,
 };
