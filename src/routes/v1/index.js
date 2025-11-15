@@ -8,6 +8,7 @@ const { getContestByMatchHandler, getMyContestHandler, getAllContestByMatchHandl
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 const { getWalletHandler } = require('../../handlers/wallet.handler');
 const { getMyTeamHandler } = require('../../handlers/team.handler');
+const { prizeBreakupHandler } = require('../../handlers/prize.handler');
 
 module.exports = async (app) => {
     /* Auth routes */
@@ -61,6 +62,7 @@ module.exports = async (app) => {
     }, getContestByMatchHandler);
 
     app.post("/getAllContestByMatch", {
+        preHandler: authenticate,
         schema: schemas.getContestByMatchSchema
     }, getAllContestByMatchHandler);
 
@@ -68,6 +70,13 @@ module.exports = async (app) => {
         preHandler: authenticate,
         schema: schemas.getMyContestSchema
     }, getMyContestHandler);
+
+    /* Prize Breakup routes */
+    app.post("/getPrizeBreakup", {
+        preHandler: authenticate,
+        schema: schemas.prizeBreakupSchema
+    }, prizeBreakupHandler);
+
 
     /* Team routes */
     app.post("/getMyTeam", {

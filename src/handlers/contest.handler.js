@@ -64,7 +64,8 @@ exports.getAllContestByMatchHandler = async (request, reply) => {
 
     try {
         const page = request.query.page || 1;
-        const { match_id, user_id } = request.body || {};
+        const { match_id } = request.body || {};
+        const { id: user_id } = request?.user || {};
 
         if (!match_id) {
             return error(reply, 'match_id is required', 400);

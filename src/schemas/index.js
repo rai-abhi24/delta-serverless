@@ -209,3 +209,17 @@ exports.getMyTeamSchema = {
         }
     }
 };
+
+exports.prizeBreakupSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['match_id', 'contest_id'],
+            properties: {
+                match_id: { type: 'string' },
+                contest_id: { type: 'string' }
+            },
+            additionalProperties: false
+        }
+    }
+};

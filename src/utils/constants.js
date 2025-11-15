@@ -56,14 +56,15 @@ module.exports = {
         USER_MATCH_IDS: (userId) => `usr:match:ids:${userId}`,
         MATCH_HISTORY: (userId, actionType, page) => `hist:mtch:${actionType}:${userId}:p${page}`,
 
+        CONTEST_TYPES: () => `meta:cont:types`,
         MATCH_META: (matchId) => `meta:mtch:${matchId}`,
         CONTEST_CATALOG: (matchId) => `cat:cont:mtch:${matchId}`,
-        USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
-        USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
         CONTEST_FEED: (matchId, page) => `feed:cont:${matchId}:p${page}`,
-        CONTEST_TYPES: () => `meta:cont:types`,
         MY_CONTESTS: (matchId, userId) => `feed:usr:mycon:${matchId}:${userId}`,
-
+        USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
+        MATCH_CONTESTS: (matchId, page, perPage) => `mtch:cont:${matchId}:p${page}:pp${perPage}`,
+        
+        USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
         USER_TOKEN: (hashedToken) => `token:${hashedToken}`,
         USER_BY_MOBILE: (mobileNumber) => `user:mobile:${mobileNumber}`,
         USER_BY_ID: (userId) => `user:id:${userId}`,
@@ -79,6 +80,7 @@ module.exports = {
         MY_TEAMS: (matchId, userId) => `usr:myteam:${matchId}:${userId}`,
         MATCH_SQUAD: (matchId) => `meta:squad:${matchId}`,
         PLAYER_IMAGE: (playerId) => `img:plyr:${playerId}`,
+        PRIZE_BREAKUP: (matchId, contestId) => `pbr:${matchId}:${contestId}`,
     },
 
     CACHE_EXPIRY: {

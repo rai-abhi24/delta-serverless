@@ -46,7 +46,7 @@ const getRedisClient = async () => {
                 connectTimeout: config.redis.connectTimeout,
                 commandTimeout: config.redis.commandTimeout,
                 retryStrategy: config.redis.retryStrategy,
-                tls: config.redis.tls,
+                // tls: config.redis.tls,
                 enableReadyCheck: false,
                 enableOfflineQueue: false,
                 lazyConnect: false,
@@ -468,6 +468,21 @@ const closeClient = async () => {
     clearMemoryCache();
 };
 
+const flushRedis = async () => {
+    const redis = await getRedisClient();
+    if (!redis) return false;
+    await redis.flushdb();
+    return true;
+}
+
+const viewKeys = async () => {
+    const redis = await getRedisClient();
+    if (!redis) return false;
+    const keys = await redis.keys('*');
+    logger.info(`Keys: ${keys}`);
+    return true;
+}
+
 module.exports = {
     get,
     set,
@@ -479,4 +494,6 @@ module.exports = {
     getStats,
     cacheAside,
     closeClient,
+    flushRedis,
+    viewKeys
 };

@@ -267,29 +267,28 @@ const transformContest = (contest, userJoinedData, userId) => {
     const isUserExpert = contest.is_bte === 1 && contest.expert_id === userId;
 
     return {
-        contestId: contest.contest_id,
-        contest_type_id: contest.contest_type,
-
-        // Contest details
-        entryFees: contest.entry_fees,
-        max_fees: contest.max_fees,
-        totalSpots: contest.total_spots,
-        filled_spot: filledSpots,
-        totalWinningPrize,
-        firstPrice: firstPrize,
-        winnerPercentage: contest.winner_percentage,
-        winnerCount: contest.winner_count || contest.prize_percentage,
-        maxAllowedTeam: contest.max_entries,
         usable_bonus: contest.usable_bonus,
-        bonus_contest: contest.bonus_contest === 1,
-        is_flexible: contest.is_flexible,
-        is_bte: contest.is_bte === 1,
-        isCancelled: contest.is_cancelled === 1,
-        cancellation: contest.cancellation === "1",
-        is_gadget_based: contest.is_gadget_based === 1,
+        bonus_contest: contest.bonus_contest,
+        filled_spot: filledSpots,
         sort_by: contest.sort_by,
         extra_cash: contest.extra_cash,
+        cancellation: contest.cancellation === "1",
+        is_bte: contest.is_bte,
+        is_flexible: contest.is_flexible,
+        is_private: contest.is_private,
+        is_gadget_based: contest.is_gadget_based,
+        contest_type_id: contest.contest_type,
+        isCancelled: contest.is_cancelled === 1,
+        maxAllowedTeam: contest.max_entries,
+        totalSpots: contest.total_spots,
+        firstPrice: firstPrize,
+        totalWinningPrize, totalWinningPrize,
+        contestId: contest.contest_id,
+        max_fees: contest.max_fees,
+        entryFees: contest.entry_fees,
+        winnerPercentage: contest.winner_percentage,
         no_of_users_team: isUserExpert ? 1 : userJoined.count,
+        winnerCount: contest.prize_percentage,
         ...(contest.is_bte === 1 && contest.expert_image && {
             expert_image: contest.expert_image.startsWith('http')
                 ? contest.expert_image
@@ -451,15 +450,21 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
 
 /* ---------------- Get All Contests By Match ---------------- */
 
-const getMatchContests = async (matchId, page = 1, limit = 500) => {
+const getMatchContests = async (matchId, page = 1, limit = 10) => {
+    const cacheKey = CACHE_KEYS.MATCH_CONTESTS(matchId, page, limit);
     try {
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
         const offset = (page - 1) * limit;
 
         const query = `
             SELECT 
                 cc.id as contest_id, cc.contest_type, cc.entry_fees, cc.mrp as max_fees, 
                 cc.total_spots, cc.filled_spot, cc.fake_counter, cc.total_winning_prize, 
-                cc.first_prize, cc.winner_percentage, cc.prize_percentage, 
+                cc.first_prize, cc.winner_percentage, cc.prize_percentage, cc.is_private,
                 cc.usable_bonus, cc.bonus_contest, cc.is_flexible, cc.is_bte, cc.is_cancelled, 
                 cc.cancellation, cc.sort_by, cc.extra_cash, cc.expert_id, cc.is_gadget_based,
                 
@@ -507,6 +512,7 @@ const getMatchContests = async (matchId, page = 1, limit = 500) => {
             [matchId]
         );
 
+        await cache.set(cacheKey, { contests, total: countResult?.total || 0 }, CACHE_EXPIRY.ONE_MINUTE);
         return {
             contests,
             total: countResult?.total || 0
@@ -519,7 +525,7 @@ const getMatchContests = async (matchId, page = 1, limit = 500) => {
 
 const getAllContestsByMatch = async (matchId, userId, page = 1) => {
     try {
-        const perPage = 10;
+        const perPage = 20;
         const match = await validateMatchTiming(matchId);
 
         if (!match) {
@@ -823,7 +829,7 @@ const transformMyContest = (contest, userId) => {
 
         // Contest properties
         winnerPercentage: contest.winner_percentage,
-        winnerCount: contest.winner_count || contest.prize_percentage,
+        winnerCount: contest.prize_percentage,
         maxAllowedTeam: contest.max_entries,
         maxEntries: contest.max_entries,
         usable_bonus: contest.usable_bonus,
