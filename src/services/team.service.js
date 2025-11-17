@@ -1,8 +1,31 @@
 const cache = require('../utils/cache');
-const { queryAll, queryOne } = require('../config/database');
+const { queryAll, queryOne, executeTransaction } = require('../config/database');
 const { TABLES } = require('../utils/tablesNames');
-const { CACHE_KEYS, CACHE_EXPIRY, MATCH_STATUS } = require('../utils/constants');
+const { CACHE_KEYS, CACHE_EXPIRY, CRICKET } = require('../utils/constants');
 const { logError, logger } = require('../utils/logger');
+const { MATCH_STATUS } = CRICKET;
+
+/**
+ * Team composition rules by match format
+ */
+const TEAM_RULES = {
+    6: { // 6-a-side
+        total: 6,
+        minPlayers: 6,
+        maxPlayers: 6
+    },
+    11: { // Standard
+        total: 11,
+        minPlayers: 11,
+        maxPlayers: 11,
+        roleConstraints: {
+            [PLAYER_ROLES.BATSMAN]: { min: 1, max: 8 },
+            [PLAYER_ROLES.BOWLER]: { min: 1, max: 8 },
+            [PLAYER_ROLES.ALL_ROUNDER]: { min: 1, max: 8 },
+            [PLAYER_ROLES.WICKET_KEEPER]: { min: 1, max: 8 }
+        }
+    }
+};
 
 /**
  * Get playing11 squad data with caching
@@ -280,14 +303,38 @@ const transformTeamData = async (team, playerImages) => {
 };
 
 /**
+ * Get match metadata
+ */
+const getMatchMetadata = async (matchId) => {
+    try {
+        const cacheKey = CACHE_KEYS.MATCH_META(matchId);
+
+        return await cache.cacheAside(
+            cacheKey,
+            async () => {
+                const match = await queryOne(`
+                    SELECT match_id, status, status_str, format, timestamp_start 
+                    FROM ${TABLES.MATCHES}
+                    WHERE match_id = ?
+                    LIMIT 1
+                `, [matchId]);
+
+                return match;
+            },
+            CACHE_EXPIRY.ONE_DAY
+        );
+    } catch (error) {
+        logError(error, { context: 'getMatchMetadata', matchId });
+        return null;
+    }
+};
+
+/**
  * Get match status and time
  */
 const getMatchStatusTime = async (matchId) => {
     try {
-        const match = await queryOne(
-            `SELECT status, status_str, timestamp_start FROM ${TABLES.MATCHES} WHERE match_id = ? LIMIT 1`,
-            [matchId]
-        );
+        const match = await getMatchMetadata(matchId);
 
         return match ? {
             status: match.status,
@@ -427,6 +474,418 @@ const fetchAndTransformTeams = async (matchId, userId, type, closeTeamIds, openT
     return result;
 };
 
+/* --------------------------------- Create Team --------------------------------- */
+
+/**
+ * Check if user has reached team creation limit
+ */
+const checkTeamCreationLimit = async (matchId, userId) => {
+    const cacheKey = CACHE_KEYS.USER_TEAM_COUNT(matchId, userId);
+
+    const teamCount = await cache.cacheAside(
+        cacheKey,
+        async () => {
+            const result = await queryOne(`
+                SELECT COUNT(1) as count 
+                FROM ${TABLES.CREATE_TEAMS} 
+                WHERE match_id = ? 
+                AND user_id = ?`,
+                [matchId, userId]
+            );
+
+            return result?.count || 0;
+        },
+        CACHE_EXPIRY.ONE_HOUR
+    );
+
+    return teamCount >= 20;
+};
+
+/**
+ * Validate players and get their roles
+ */
+const validatePlayers = async (matchId, playerIds) => {
+    if (!playerIds.length) return { valid: false, players: [] };
+
+    const cacheKey = CACHE_KEYS.MATCH_PLAYERS(matchId);
+
+    const players = await cache.cacheAside(
+        cacheKey,
+        async () => {
+            const playerData = await queryAll(`
+                SELECT pid, playing_role, team_id, name
+                FROM ${TABLES.PLAYERS} 
+                WHERE match_id = ?`,
+                [matchId]
+            );
+
+            const playerMap = new Map();
+            playerData.forEach(player => {
+                playerMap.set(player.pid, player);
+            });
+
+            return playerMap;
+        },
+        CACHE_EXPIRY.ONE_DAY
+    );
+
+    const validPlayers = [];
+    for (const playerId of playerIds) {
+        const player = players.get(playerId);
+        if (!player) {
+            return { valid: false, error: `Invalid player ID: ${playerId}` };
+        }
+        validPlayers.push(player);
+    }
+
+    return { valid: true, players: validPlayers };
+};
+
+/**
+ * Validate team composition rules
+ */
+const validateTeamComposition = (players, captainId, viceCaptainId, matchFormat) => {
+    const rules = TEAM_RULES[matchFormat] || TEAM_RULES[11];
+
+    if (players.length !== rules.total) {
+        return { valid: false, error: `Team must have exactly ${rules.total} players` };
+    }
+
+    if (captainId === viceCaptainId) {
+        return { valid: false, error: 'Captain and Vice-Captain cannot be the same player' };
+    }
+
+    if (rules.roleConstraints) {
+        const roleCount = {};
+
+        players.forEach(player => {
+            roleCount[player.playing_role] = (roleCount[player.playing_role] || 0) + 1;
+        });
+
+        for (const [role, constraints] of Object.entries(rules.roleConstraints)) {
+            const count = roleCount[role] || 0;
+            if (count < constraints.min || count > constraints.max) {
+                return {
+                    valid: false,
+                    error: `${role} count must be between ${constraints.min} and ${constraints.max}`
+                };
+            }
+        }
+    }
+
+    return { valid: true };
+};
+
+/**
+ * Check for duplicate team (same players, captain, vice-captain)
+ */
+const checkDuplicateTeam = async (matchId, userId, playerIds, captainId, viceCaptainId) => {
+    const teamHash = createTeamHash(playerIds, captainId, viceCaptainId);
+
+    const cacheKey = CACHE_KEYS.TEAM_HASH(matchId, userId, teamHash);
+    const exists = await cache.get(cacheKey);
+
+    if (exists) return true;
+
+    const existingTeam = await queryOne(`
+        SELECT id FROM ${TABLES.CREATE_TEAMS} 
+        WHERE match_id = ? 
+        AND user_id = ? 
+        AND team_hash = ? 
+        LIMIT 1`,
+        [matchId, userId, teamHash]
+    );
+
+    if (existingTeam) {
+        await cache.set(cacheKey, true, CACHE_EXPIRY.ONE_DAY);
+        return true;
+    }
+
+    return false;
+};
+
+/**
+ * Create unique hash for team combination
+ */
+const createTeamHash = (playerIds, captainId, viceCaptainId) => {
+    const sortedPlayers = [...playerIds].sort((a, b) => a - b);
+    return `${sortedPlayers.join(',')}|${captainId}|${viceCaptainId}`;
+};
+
+/**
+ * Create team in database
+ */
+const createTeamRecord = async (teamData, isUpdate = false) => {
+    return await executeTransaction(async (connection) => {
+        const now = new Date();
+        const teamHash = createTeamHash(teamData.teams, teamData.captain, teamData.vice_captain);
+
+        if (isUpdate) {
+            await connection.execute(`
+                UPDATE ${TABLES.CREATE_TEAMS} 
+                SET teams = '${JSON.stringify(teamData.teams)}', captain = '${teamData.captain}', vice_captain = '${teamData.vice_captain}', team_hash = '${teamHash}', update_team_time = '${now}', edit_team_count = edit_team_count + 1
+                WHERE id = '${teamData.create_team_id}' AND user_id = '${teamData.user_id}'`,
+            );
+
+            return teamData.create_team_id;
+        } else {
+            let teamCount = 0;
+            const cacheKey = CACHE_KEYS.USER_TEAM_COUNT(matchId, userId);
+            const cachedTeamCount = await cache.get(cacheKey);
+
+            if (!cachedTeamCount) {
+                const count = await connection.execute(`
+                    SELECT COUNT(1) as count 
+                    FROM ${TABLES.CREATE_TEAMS} 
+                    WHERE match_id = ? AND user_id = ?`,
+                    [teamData.match_id, teamData.user_id]
+                );
+
+                teamCount = count[0][0]?.count || 0;
+                await cache.set(cacheKey, teamCount + 1, CACHE_EXPIRY.ONE_HOUR);
+            } else {
+                teamCount = cachedTeamCount;
+            }
+
+            const teamNumber = `T${teamCount + 1}`;
+
+            const result = await connection.execute(`
+                INSERT INTO ${TABLES.CREATE_TEAMS} 
+                (match_id, user_id, teams, captain, vice_captain, team_hash,
+                 team_count, create_team_time, update_team_time, expert_user_id,
+                 expert_team_id, contest_id, edit_team_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    teamData.match_id,
+                    teamData.user_id,
+                    JSON.stringify(teamData.teams),
+                    teamData.captain,
+                    teamData.vice_captain,
+                    teamHash,
+                    teamNumber,
+                    now,
+                    now,
+                    teamData.expert_user_id || 0,
+                    teamData.expert_team_id || 0,
+                    teamData.contest_id || 0,
+                    0
+                ]
+            );
+
+            return result[0].insertId;
+        }
+    });
+};
+
+/**
+ * Update player analytics (non-blocking)
+ */
+const updatePlayerAnalytics = async (teamData, teamId) => {
+    setImmediate(async () => {
+        try {
+            await executeTransaction(async (connection) => {
+                await connection.execute(`
+                    DELETE FROM ${TABLES.PLAYER_ANALYTICS} 
+                    WHERE created_team_id = ? AND user_id = ?`,
+                    [teamId, teamData.user_id]
+                );
+
+                const analyticsData = teamData.teams.map(playerId => [
+                    teamData.match_id,
+                    teamId,
+                    playerId,
+                    teamData.captain,
+                    teamData.vice_captain,
+                    0, // customer_type
+                    teamData.user_id,
+                    new Date()
+                ]);
+
+                if (analyticsData.length > 0) {
+                    await connection.query(`
+                        INSERT INTO ${TABLES.PLAYER_ANALYTICS} 
+                        (match_id, created_team_id, player_id, captain, vice_captain, customer_type, user_id, created_at)
+                        VALUES ?`,
+                        [analyticsData]
+                    );
+                }
+            });
+        } catch (error) {
+            logError(error, { 
+                context: 'updatePlayerAnalytics', 
+                teamId, 
+                userId: teamData.user_id 
+            });
+        }
+    });
+};
+
+/**
+ * Invalidate relevant caches
+ */
+const invalidateCaches = async (matchId, userId) => {
+    const cacheKeys = [
+        CACHE_KEYS.USER_TEAMS(matchId, userId),
+    ];
+
+    try {
+        await Promise.allSettled(
+            cacheKeys.map(key => cache.del(key))
+        );
+    } catch (error) {
+        logError(error, { context: 'invalidateCaches', matchId, userId });
+    }
+};
+
+/**
+ * Main function: Create or update team
+ */
+const createTeam = async (teamData) => {
+    const startTime = Date.now();
+    const { match_id, user_id, teams, captain, vice_captain, create_team_id, trace_id } = teamData;
+
+    try {
+        logger.info('Team creation started', {
+            traceId: trace_id,
+            matchId: match_id,
+            userId: user_id,
+            isUpdate: !!create_team_id
+        });
+
+        const [match, teamLimitReached] = await Promise.all([
+            getMatchMetadata(match_id),
+            checkTeamCreationLimit(match_id, user_id)
+        ]);
+
+        if (!match) {
+            return {
+                system_time: Math.floor(Date.now() / 1000),
+                status: false,
+                code: 201,
+                message: 'Match not found'
+            };
+        }
+
+        const currentTime = Math.floor(Date.now() / 1000);
+        if (currentTime > match.timestamp_start) {
+            return {
+                system_time: currentTime,
+                status: false,
+                code: 201,
+                message: 'Match time up'
+            };
+        }
+
+        if (!create_team_id && teamLimitReached) {
+            return {
+                system_time: currentTime,
+                status: false,
+                code: 201,
+                message: 'Max create team limit exceeded (20 teams)'
+            };
+        }
+
+        const playerValidation = await validatePlayers(match_id, teams);
+        if (!playerValidation.valid) {
+            return {
+                system_time: currentTime,
+                status: false,
+                code: 201,
+                message: playerValidation.error
+            };
+        }
+
+        const compositionValidation = validateTeamComposition(
+            playerValidation.players,
+            captain,
+            vice_captain,
+            match.format
+        );
+
+        if (!compositionValidation.valid) {
+            return {
+                system_time: currentTime,
+                status: false,
+                code: 201,
+                message: compositionValidation.error
+            };
+        }
+
+        if (!create_team_id) {
+            const isDuplicate = await checkDuplicateTeam(match_id, user_id, teams, captain, vice_captain);
+            if (isDuplicate) {
+                return {
+                    system_time: currentTime,
+                    status: false,
+                    code: 201,
+                    message: 'You have already created this team combination'
+                };
+            }
+        }
+
+        const teamId = await createTeamRecord(teamData, !!create_team_id);
+
+        Promise.allSettled([
+            updatePlayerAnalytics(teamData, teamId),
+            invalidateCaches(match_id, user_id)
+        ]).catch(err => {
+            logError(err, {
+                context: 'createTeamBackgroundOps',
+                teamId,
+                userId: user_id
+            });
+        });
+
+        const response = {
+            system_time: currentTime,
+            match_status: match.status_str,
+            match_time: match.timestamp_start,
+            status: true,
+            code: 200,
+            message: 'Team created successfully',
+            response: {
+                create_team_id: teamId,
+                team_count: create_team_id ? undefined : `T${await getTeamCount(match_id, user_id)}`
+            },
+            _meta: {
+                processing_time_ms: Date.now() - startTime,
+                trace_id: trace_id,
+            }
+        };
+
+        logger.info('Team creation completed', {
+            traceId: trace_id,
+            matchId: match_id,
+            userId: user_id,
+            teamId: teamId,
+            duration: Date.now() - startTime
+        });
+
+        return response;
+
+    } catch (error) {
+        logError(error, {
+            context: 'createTeam',
+            traceId: trace_id,
+            matchId: match_id,
+            userId: user_id
+        });
+
+        return {
+            system_time: Math.floor(Date.now() / 1000),
+            status: false,
+            code: 500,
+            message: 'Failed to create team',
+            _meta: {
+                processing_time_ms: Date.now() - startTime,
+                error: true,
+                trace_id: trace_id
+            }
+        };
+    }
+};
+
 module.exports = {
+    createTeam,
     getMyTeams
 };

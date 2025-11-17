@@ -7,7 +7,8 @@ const { logError, logger } = require('../utils/logger');
 const { queryAll, queryOne } = require('../config/database');
 const { TABLES } = require('../utils/tablesNames');
 const { getFantasyKey } = require('../utils/helper');
-const { CACHE_KEYS, CACHE_EXPIRY, MATCH_STATUS } = require('../utils/constants');
+const { CACHE_KEYS, CACHE_EXPIRY, CRICKET } = require('../utils/constants');
+const { MATCH_STATUS } = CRICKET;
 
 /**
  * Get all matches with all related data in ONE query

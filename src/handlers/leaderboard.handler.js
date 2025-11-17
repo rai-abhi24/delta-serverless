@@ -9,7 +9,8 @@ exports.getLeaderboardHandler = async (request, reply) => {
     const startTime = Date.now();
 
     try {
-        const { match_id, contest_id, user_id } = request.body || {};
+        const { match_id, contest_id } = request.body || {};
+        const { id: user_id } = request?.user || {};
         const page = parseInt(request.query?.page || 1);
 
         if (!match_id) return error(reply, 'match_id is required', 400);

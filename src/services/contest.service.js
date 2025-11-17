@@ -4,11 +4,11 @@
 
 const config = require('../config');
 const cache = require('../utils/cache');
-const { CACHE_KEYS, CACHE_EXPIRY, MATCH_STATUS } = require('../utils/constants');
+const { CACHE_KEYS, CACHE_EXPIRY, CRICKET } = require('../utils/constants');
 const { queryAll, queryOne, executeTransaction } = require('../config/database');
 const { logError, logger } = require('../utils/logger');
 const { TABLES } = require('../utils/tablesNames');
-
+const { MATCH_STATUS } = CRICKET;
 /**
  * Validate match and check if it's still open for joining
  */
@@ -20,7 +20,7 @@ const validateMatchTiming = async (matchId) => {
             cacheKey,
             async () => {
                 const match = await queryOne(`
-                    SELECT match_id, timestamp_start, status, status_str 
+                    SELECT match_id, status, status_str, format, timestamp_start 
                     FROM ${TABLES.MATCHES} 
                     WHERE match_id = ? 
                     LIMIT 1`,

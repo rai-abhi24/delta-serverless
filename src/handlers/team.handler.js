@@ -1,5 +1,5 @@
 const { logger } = require('../utils/logger');
-const { success, error } = require('../utils/response');
+const { success, error, unauthorized } = require('../utils/response');
 const teamService = require('../services/team.service');
 const userService = require('../services/user.service');
 
@@ -57,5 +57,61 @@ exports.getMyTeamHandler = async (request, reply) => {
         }, 'Error in getMyTeam handler');
 
         return error(reply, 'Failed to fetch my teams', 500);
+    }
+};
+
+/**
+ * Create team handler
+ */
+exports.createTeamHandler = async (request, reply) => {
+    const startTime = Date.now();
+    const traceId = request.id;
+
+    try {
+        const {
+            match_id,
+            team_id,
+            teams,
+            captain,
+            vice_captain,
+        } = request.body || {};
+
+        if (!match_id) {
+            return error(reply, 'Match not found', 400);
+        }
+
+        if (!team_id || !teams || !captain || !vice_captain) {
+            return error(reply, 'Required fields are missing', 400);
+        }
+
+        const { id: userId } = request.user || {};
+        if (!userId) {
+            return unauthorized(reply);
+        }
+
+        if (!teams.includes(captain) || !teams.includes(vice_captain)) {
+            return error(reply, 'Captain and Vice-Captain must be part of the team', 400);
+        }
+
+        const result = await teamService.createTeam({
+            ...request.body,
+            user_id: userId,
+            trace_id: traceId
+        });
+
+        if (result._meta) {
+            result._meta.total_request_time_ms = Date.now() - startTime;
+        }
+
+        return success(reply, result, result.code || 200);
+    } catch (err) {
+        logError(err, {
+            context: 'createTeamHandler',
+            traceId,
+            userId: request.user?.id,
+            duration: Date.now() - startTime
+        });
+
+        return error(reply, 'Failed to create team', 500);
     }
 };

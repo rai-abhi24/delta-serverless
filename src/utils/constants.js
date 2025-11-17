@@ -3,6 +3,26 @@
  */
 
 module.exports = {
+    CRICKET: {
+        MATCH_FORMAT: {
+            ODI: 1,
+            TEST: 2,
+            T20I: 3,
+            LIST_A: 4,
+            FIRST_CLASS: 5,
+            T20: 6,
+            WOMEN_ODI: 7,
+            WOMEN_T20: 8,
+        },
+        MATCH_STATUS: {
+            IN_REVIEW: 0,
+            UPCOMING: 1,
+            COMPLETED: 2,
+            LIVE: 3,
+            ABANDONED: 4
+        },
+    },
+
     // Active sports configuration
     ACTIVE_SPORTS: {
         cricket: 1,
@@ -64,11 +84,13 @@ module.exports = {
         MY_CONTESTS: (matchId, userId) => `feed:usr:mycon:${matchId}:${userId}`,
         USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
         MATCH_CONTESTS: (matchId, page, perPage) => `mtch:cont:${matchId}:p${page}:pp${perPage}`,
+        MATCH_PLAYERS: (matchId) => `mtch:players:${matchId}`,
 
         USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
         USER_TOKEN: (hashedToken) => `token:${hashedToken}`,
         USER_BY_MOBILE: (mobileNumber) => `user:mobile:${mobileNumber}`,
         USER_BY_ID: (userId) => `user:id:${userId}`,
+        USER_TEAM_COUNT: (matchId, userId) => `team:cnt:${matchId}:${userId}`,
 
         WALLET_BALANCES: (userId) => `wlt:bal:${userId}`,
         WALLET_FULL: (userId, platform) => `wlt:full:${userId}:${platform}`,
@@ -78,11 +100,14 @@ module.exports = {
         ACCOUNT_VERIFICATION: (userId) => `acc:ver:${userId}`,
         PAYMENT_GATEWAYS: (platform) => `pay:gtw:${platform}`,
 
-        MY_TEAMS: (matchId, userId) => `usr:myteam:${matchId}:${userId}`,
         MATCH_SQUAD: (matchId) => `meta:squad:${matchId}`,
         PLAYER_IMAGE: (playerId) => `img:plyr:${playerId}`,
         PRIZE_BREAKUP: (matchId, contestId) => `pbr:${matchId}:${contestId}`,
-        LEADERBOARD: (matchId, contestId, userId, page) => `leaderboard:${matchId}:${contestId}:${userId}:${page}`
+        LEADERBOARD: (matchId, contestId, userId, page) => `leaderboard:${matchId}:${contestId}:${userId}:${page}`,
+
+        PLAYERS: (matchId) => `plyr:${matchId}`,
+        LINEUP_STATUS: (matchId) => `lineup:${matchId}`,
+        TEAM_HASH: (matchId, userId, teamHash) => `hash:team:${matchId}:${userId}:${teamHash}`,
     },
 
     CACHE_EXPIRY: {
@@ -100,14 +125,6 @@ module.exports = {
         HOUR: (hours) => hours * 3600,
         DAY: (days) => days * 86400,
         WEEK: (weeks) => weeks * 604800,
-    },
-
-    MATCH_STATUS: {
-        IN_REVIEW: 0,
-        UPCOMING: 1,
-        COMPLETED: 2,
-        LIVE: 3,
-        ABANDONED: 4
     },
 
     // iOS app configuration

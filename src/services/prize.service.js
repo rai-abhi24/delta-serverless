@@ -5,8 +5,9 @@
 const cache = require('../utils/cache');
 const { TABLES } = require('../utils/tablesNames');
 const { queryAll, queryOne } = require('../config/database');
-const { CACHE_KEYS, CACHE_EXPIRY, MATCH_STATUS } = require('../utils/constants');
+const { CACHE_KEYS, CACHE_EXPIRY, CRICKET } = require('../utils/constants');
 const { logError, logger } = require('../utils/logger');
+const { MATCH_STATUS } = CRICKET;
 
 /**
  * Get or create prize breakup for flexible/unlimited contests

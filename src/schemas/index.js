@@ -223,3 +223,16 @@ exports.prizeBreakupSchema = {
         }
     }
 };
+
+exports.getPlayerSchema = {
+    schema: {
+        body: {
+            type: 'object',
+            required: ['match_id'],
+            properties: {
+                match_id: { type: 'string' }
+            },
+            additionalProperties: false
+        }
+    }
+};
