@@ -58,12 +58,13 @@ module.exports = {
 
         CONTEST_TYPES: () => `meta:cont:types`,
         MATCH_META: (matchId) => `meta:mtch:${matchId}`,
+        CONTEST_META: (contestId) => `meta:cont:${contestId}`,
         CONTEST_CATALOG: (matchId) => `cat:cont:mtch:${matchId}`,
         CONTEST_FEED: (matchId, page) => `feed:cont:${matchId}:p${page}`,
         MY_CONTESTS: (matchId, userId) => `feed:usr:mycon:${matchId}:${userId}`,
         USER_CONTESTS: (matchId, userId) => `usr:cont:${matchId}:${userId}`,
         MATCH_CONTESTS: (matchId, page, perPage) => `mtch:cont:${matchId}:p${page}:pp${perPage}`,
-        
+
         USER_TEAMS: (matchId, userId) => `usr:team:${matchId}:${userId}`,
         USER_TOKEN: (hashedToken) => `token:${hashedToken}`,
         USER_BY_MOBILE: (mobileNumber) => `user:mobile:${mobileNumber}`,
@@ -81,6 +82,7 @@ module.exports = {
         MATCH_SQUAD: (matchId) => `meta:squad:${matchId}`,
         PLAYER_IMAGE: (playerId) => `img:plyr:${playerId}`,
         PRIZE_BREAKUP: (matchId, contestId) => `pbr:${matchId}:${contestId}`,
+        LEADERBOARD: (matchId, contestId, userId, page) => `leaderboard:${matchId}:${contestId}:${userId}:${page}`
     },
 
     CACHE_EXPIRY: {

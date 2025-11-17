@@ -158,29 +158,68 @@ const getBatchGuruCounts = async (matchIds) => {
  * @returns {Object} Formatted date and time left
  */
 const formatMatchDate = (timestamp) => {
-    const currentTime = Math.floor(Date.now() / 1000);
-    const timeDiff = Math.round((timestamp - currentTime) / 60);
+    const now = new Date();
+    const matchDate = new Date(timestamp * 1000);
 
-    const date = new Date(timestamp * 1000);
+    const diffSec = Math.floor(timestamp - Math.floor(Date.now() / 1000));
+
+    if (diffSec <= 0) {
+        return {
+            date_start: "Time Up",
+            time_left: "Time Up",
+            time_diff_seconds: diffSec
+        };
+    }
+
+    const isToday =
+        now.getDate() === matchDate.getDate() &&
+        now.getMonth() === matchDate.getMonth() &&
+        now.getFullYear() === matchDate.getFullYear();
+
+    const isTommorrow =
+        now.getDate() + 1 === matchDate.getDate() &&
+        now.getMonth() === matchDate.getMonth() &&
+        now.getFullYear() === matchDate.getFullYear();
+
     let dateStart;
 
-    if (timeDiff > 1440) {
-        dateStart = date.toLocaleString('en-IN', {
-            day: '2-digit', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', hour12: true,
-            timeZone: 'Asia/Kolkata'
+    if (isToday) {
+        const time = matchDate.toLocaleString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "Asia/Kolkata"
         });
+
+        dateStart = `Today, ${time}`;
+    } else if (isTommorrow) {
+        const time = matchDate.toLocaleString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "Asia/Kolkata"
+        });
+
+        dateStart = `Tommorrow, ${time}`;
     } else {
-        dateStart = date.toLocaleString('en-IN', {
-            hour: '2-digit', minute: '2-digit', hour12: true,
-            timeZone: 'Asia/Kolkata'
+        dateStart = matchDate.toLocaleString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "Asia/Kolkata"
         });
     }
 
+    const diffMin = Math.ceil(diffSec / 60);
+    const timeLeft = `${diffMin} Min`;
+
     return {
         date_start: dateStart,
-        time_left: timeDiff > 0 ? `${timeDiff}Min` : 'time up',
-        time_diff_minutes: timeDiff,
+        time_left: timeLeft,
+        time_diff_seconds: diffSec,
+        time_diff_minutes: diffMin
     };
 };
 

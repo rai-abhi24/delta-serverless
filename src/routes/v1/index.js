@@ -9,86 +9,41 @@ const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 const { getWalletHandler } = require('../../handlers/wallet.handler');
 const { getMyTeamHandler } = require('../../handlers/team.handler');
 const { prizeBreakupHandler } = require('../../handlers/prize.handler');
+const { getLeaderboardHandler } = require('../../handlers/leaderboard.handler');
 
 module.exports = async (app) => {
     /* Auth routes */
     app.post("/loginByMobileNumber", { schema: schemas.loginSchema }, loginHandler);
 
-    app.post("/logout", {
-        preHandler: authenticate
-    }, logoutHandler);
+    app.post("/logout", { preHandler: authenticate }, logoutHandler);
 
     /* Basic routes */
-    app.post("/apkUpdate", {
-        schema: schemas.apkUpdateSchema
-    }, apkUpdateHandler);
-
-    app.get("/getStories", {
-        preHandler: authenticate,
-        schema: schemas.getStoriesSchema
-    }, getStoriesHandler);
-
-    app.get("/getRecentWinners", {
-        preHandler: authenticate,
-        schema: schemas.getRecentWinnersSchema
-    }, getRecentWinnersHandler);
-
-    app.post("/deviceNotification", {
-        preHandler: authenticate,
-        schema: schemas.deviceNotificationSchema
-    }, deviceNotificationHandler);
+    app.get("/getStories", { preHandler: authenticate, schema: schemas.getStoriesSchema }, getStoriesHandler);
+    app.get("/getRecentWinners", { preHandler: authenticate, schema: schemas.getRecentWinnersSchema }, getRecentWinnersHandler);
+    app.post("/deviceNotification", { preHandler: authenticate, schema: schemas.deviceNotificationSchema }, deviceNotificationHandler);
+    app.post("/apkUpdate", { schema: schemas.apkUpdateSchema }, apkUpdateHandler);
 
     /* Banner routes */
-    app.post("/getBanners", {
-        preHandler: authenticate,
-        schema: schemas.getBannersSchema
-    }, bannerHandler);
+    app.post("/getBanners", { preHandler: authenticate, schema: schemas.getBannersSchema }, bannerHandler);
 
     /* Match routes */
-    app.post("/getMatch", {
-        preHandler: authenticate,
-        schema: schemas.getMatchSchema
-    }, getMatchHandler);
-
-    app.post("/getMatchHistory", {
-        preHandler: authenticate,
-        schema: schemas.getMatchHistorySchema
-    }, getMatchHistoryHandler);
+    app.post("/getMatch", { preHandler: authenticate, schema: schemas.getMatchSchema }, getMatchHandler);
+    app.post("/getMatchHistory", { preHandler: authenticate, schema: schemas.getMatchHistorySchema }, getMatchHistoryHandler);
 
     /* Contest routes */
-    app.post("/getContestByMatch", {
-        preHandler: authenticate,
-        schema: schemas.getContestByMatchSchema
-    }, getContestByMatchHandler);
-
-    app.post("/getAllContestByMatch", {
-        preHandler: authenticate,
-        schema: schemas.getContestByMatchSchema
-    }, getAllContestByMatchHandler);
-
-    app.post("/getMyContest", {
-        preHandler: authenticate,
-        schema: schemas.getMyContestSchema
-    }, getMyContestHandler);
+    app.post("/getContestByMatch", { preHandler: authenticate, schema: schemas.getContestByMatchSchema }, getContestByMatchHandler);
+    app.post("/getAllContestByMatch", { preHandler: authenticate, schema: schemas.getContestByMatchSchema }, getAllContestByMatchHandler);
+    app.post("/getMyContest", { preHandler: authenticate, schema: schemas.getMyContestSchema }, getMyContestHandler);
 
     /* Prize Breakup routes */
-    app.post("/getPrizeBreakup", {
-        preHandler: authenticate,
-        schema: schemas.prizeBreakupSchema
-    }, prizeBreakupHandler);
-
+    app.post("/getPrizeBreakup", { preHandler: authenticate, schema: schemas.prizeBreakupSchema }, prizeBreakupHandler);
+    app.post("/leaderBoard", { schema: schemas.prizeBreakupSchema }, getLeaderboardHandler);
 
     /* Team routes */
-    app.post("/getMyTeam", {
-        preHandler: authenticate,
-        schema: schemas.getMyTeamSchema
-    }, getMyTeamHandler);
+    app.post("/getMyTeam", { preHandler: authenticate, schema: schemas.getMyTeamSchema }, getMyTeamHandler);
 
     /* Wallet routes */
-    app.post("/getWallet", {
-        preHandler: authenticate,
-        schema: schemas.getWalletSchema
-    }, getWalletHandler);
+    app.post("/getWallet", { preHandler: authenticate, schema: schemas.getWalletSchema }, getWalletHandler);
 
     // ============================================
     // TODO: Below routes are not implemented yet
@@ -124,20 +79,18 @@ module.exports = async (app) => {
     app.post("/getExpertGuruTeams", {
         preHandler: authenticate,
         schema: schemas.getWalletSchema
-    },
-        async (_request, reply) => {
-            return reply.send({
-                "system_time": Math.floor(Date.now() / 1000),
-                "match_status": null,
-                "match_time": null,
-                "status": true,
-                "code": 200,
-                "teamCount": 0,
-                "message": "success",
-                "response": {
-                    "myteam": []
-                }
-            });
-        }
-    );
+    }, async (_request, reply) => {
+        return reply.send({
+            "system_time": Math.floor(Date.now() / 1000),
+            "match_status": null,
+            "match_time": null,
+            "status": true,
+            "code": 200,
+            "teamCount": 0,
+            "message": "success",
+            "response": {
+                "myteam": []
+            }
+        });
+    });
 };
