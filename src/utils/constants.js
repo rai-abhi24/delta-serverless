@@ -21,6 +21,12 @@ module.exports = {
             LIVE: 3,
             ABANDONED: 4
         },
+        PLAYER_ROLES:{
+            BATSMAN: 'bat',
+            BOWLER: 'bowl',
+            ALL_ROUNDER: 'all',
+            WICKET_KEEPER: 'wk'
+        }
     },
 
     // Active sports configuration

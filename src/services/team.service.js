@@ -3,7 +3,7 @@ const { queryAll, queryOne, executeTransaction } = require('../config/database')
 const { TABLES } = require('../utils/tablesNames');
 const { CACHE_KEYS, CACHE_EXPIRY, CRICKET } = require('../utils/constants');
 const { logError, logger } = require('../utils/logger');
-const { MATCH_STATUS } = CRICKET;
+const { MATCH_STATUS, PLAYER_ROLES, MATCH_FORMAT } = CRICKET;
 
 /**
  * Team composition rules by match format
@@ -374,7 +374,7 @@ const getMyTeams = async (matchId, userId, options = {}) => {
 
         const isFiltered = type === 'close' || type === 'open';
         const cacheTTL = (match.status === MATCH_STATUS.COMPLETED || match.status === MATCH_STATUS.ABANDONED) ? CACHE_EXPIRY.ONE_DAY : 60;
-        const feedCacheKey = `${CACHE_KEYS.MY_TEAMS(matchId, userId)}:${type || 'all'}`;
+        const feedCacheKey = `${CACHE_KEYS.USER_TEAMS(matchId, userId)}:${type || 'all'}`;
 
         if (isFiltered) {
             return await fetchAndTransformTeams(matchId, userId, type, close_team_id, open_team_id);
@@ -513,25 +513,25 @@ const validatePlayers = async (matchId, playerIds) => {
         cacheKey,
         async () => {
             const playerData = await queryAll(`
-                SELECT pid, playing_role, team_id, name
+                SELECT pid, playing_role, team_id 
                 FROM ${TABLES.PLAYERS} 
                 WHERE match_id = ?`,
                 [matchId]
             );
 
-            const playerMap = new Map();
-            playerData.forEach(player => {
-                playerMap.set(player.pid, player);
-            });
-
-            return playerMap;
+            return playerData;
         },
         CACHE_EXPIRY.ONE_DAY
     );
 
+    const playerLookup = {};
+    players.forEach(player => {
+        playerLookup[player.pid] = player;
+    });
+
     const validPlayers = [];
     for (const playerId of playerIds) {
-        const player = players.get(playerId);
+        const player = playerLookup[playerId];
         if (!player) {
             return { valid: false, error: `Invalid player ID: ${playerId}` };
         }
@@ -545,7 +545,8 @@ const validatePlayers = async (matchId, playerIds) => {
  * Validate team composition rules
  */
 const validateTeamComposition = (players, captainId, viceCaptainId, matchFormat) => {
-    const rules = TEAM_RULES[matchFormat] || TEAM_RULES[11];
+    const teamSize = [17, 21].includes(matchFormat) ? 6 : 11;
+    const rules = TEAM_RULES[teamSize];
 
     if (players.length !== rules.total) {
         return { valid: false, error: `Team must have exactly ${rules.total} players` };
@@ -630,7 +631,7 @@ const createTeamRecord = async (teamData, isUpdate = false) => {
             return teamData.create_team_id;
         } else {
             let teamCount = 0;
-            const cacheKey = CACHE_KEYS.USER_TEAM_COUNT(matchId, userId);
+            const cacheKey = CACHE_KEYS.USER_TEAM_COUNT(teamData.match_id, teamData.user_id);
             const cachedTeamCount = await cache.get(cacheKey);
 
             if (!cachedTeamCount) {
@@ -711,10 +712,10 @@ const updatePlayerAnalytics = async (teamData, teamId) => {
                 }
             });
         } catch (error) {
-            logError(error, { 
-                context: 'updatePlayerAnalytics', 
-                teamId, 
-                userId: teamData.user_id 
+            logError(error, {
+                context: 'updatePlayerAnalytics',
+                teamId,
+                userId: teamData.user_id
             });
         }
     });
@@ -884,6 +885,28 @@ const createTeam = async (teamData) => {
         };
     }
 };
+
+/**
+ * Get user's team count for this match
+ */
+const getTeamCount = async (matchId, userId) => {
+    const cacheKey = CACHE_KEYS.USER_TEAM_COUNT(matchId, userId);
+    const teamCount = await cache.cacheAside(
+        cacheKey,
+        async () => {
+            return await queryOne(`
+                SELECT COUNT(1) as count 
+                FROM ${TABLES.CREATE_TEAMS} 
+                WHERE match_id = ? AND user_id = ?`,
+                [matchId, userId]
+            );
+        },
+        CACHE_EXPIRY.ONE_HOUR
+    );
+
+    return teamCount?.count || 0;
+};
+
 
 module.exports = {
     createTeam,
