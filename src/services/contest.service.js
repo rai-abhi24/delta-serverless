@@ -4,11 +4,13 @@
 
 const config = require('../config');
 const cache = require('../utils/cache');
+const teamService = require('./team.service');
 const { CACHE_KEYS, CACHE_EXPIRY, CRICKET } = require('../utils/constants');
 const { queryAll, queryOne, executeTransaction } = require('../config/database');
 const { logError, logger } = require('../utils/logger');
 const { TABLES } = require('../utils/tablesNames');
 const { MATCH_STATUS } = CRICKET;
+
 /**
  * Validate match and check if it's still open for joining
  */
@@ -1070,6 +1072,7 @@ const determineJoinAction = (data) => {
 
     if (currentTime >= data.timestamp_start) {
         return {
+            status: false,
             action: 1,
             message: 'Match time is up',
             can_join: false,
@@ -1079,6 +1082,7 @@ const determineJoinAction = (data) => {
 
     if (!data.contest_id || data.is_cancelled === 1) {
         return {
+            status: false,
             action: 1,
             message: 'Invalid Contest',
             can_join: false,
@@ -1088,6 +1092,7 @@ const determineJoinAction = (data) => {
 
     if (data.customer_type === 9 && data.total_spots < 100) {
         return {
+            status: false,
             action: 1,
             message: 'Something went wrong please contact Support for help',
             can_join: false,
@@ -1097,6 +1102,7 @@ const determineJoinAction = (data) => {
 
     if (data.total_spots > 0 && data.filled_spot >= data.total_spots) {
         return {
+            status: false,
             action: 3,
             message: 'Contest is full',
             can_join: false,
@@ -1106,6 +1112,7 @@ const determineJoinAction = (data) => {
 
     if (parseFloat(data.entry_fees) > parseFloat(data.wallet_balance)) {
         return {
+            status: false,
             action: 1,
             message: 'Insufficient wallet balance',
             can_join: false,
@@ -1117,6 +1124,7 @@ const determineJoinAction = (data) => {
 
     if (data.total_teams === 0) {
         return {
+            status: false,
             action: 1,
             message: 'Create new team to join this contest',
             can_join: false,
@@ -1126,6 +1134,7 @@ const determineJoinAction = (data) => {
 
     if (availableTeams > 0) {
         return {
+            status: true,
             action: 2,
             message: 'Join contest',
             can_join: true,
@@ -1134,6 +1143,7 @@ const determineJoinAction = (data) => {
     }
 
     return {
+        status: false,
         action: 1,
         message: 'Create new team to join this contest',
         can_join: false,
@@ -1174,14 +1184,13 @@ const getJoinContestStatus = async (matchId, contestId, userId) => {
                     );
 
                     if (availableTeamIds.length > 0) {
-                        teamList = [{
-                            open_team: availableTeamIds
-                        }];
+                        const teeamData = await teamService.getMyTeams(matchId, userId, { type: 'open', open_team_id: availableTeamIds });
+                        teamList = [{ open_team: teeamData.response.myteam }];
                     }
                 }
 
                 const response = {
-                    status: true,
+                    status: result.status,
                     code: 200,
                     message: result.message,
                     action: result.action,
