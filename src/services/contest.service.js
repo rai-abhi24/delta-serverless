@@ -956,8 +956,275 @@ const getMyContests = async (matchId, userId, versionCode = null) => {
     }
 };
 
+/* --------------------- Join Contest --------------------- */
+
+/**
+ * Get join status
+ * Combines: contest check, wallet check, user teams, joined teams
+ */
+const getJoinStatus = async (matchId, contestId, userId) => {
+    try {
+        const query = `
+            SELECT 
+                -- Contest data
+                cc.id as contest_id,
+                cc.match_id,
+                cc.entry_fees,
+                cc.total_spots,
+                cc.filled_spot,
+                cc.is_cancelled,
+                cc.is_private,
+                
+                -- Match timing
+                m.timestamp_start,
+                m.status as match_status,
+                
+                -- User wallet balance (only deposit + prize)
+                (SELECT COALESCE(SUM(amount), 0) 
+                 FROM ${TABLES.WALLETS} 
+                 WHERE user_id = ? 
+                 AND payment_type IN (3, 4)) as wallet_balance,
+                
+                -- Total teams created
+                (SELECT COUNT(*) 
+                 FROM ${TABLES.CREATE_TEAMS} 
+                 WHERE match_id = ? 
+                 AND user_id = ?) as total_teams,
+                
+                -- Teams already joined in this contest
+                (SELECT COUNT(*) 
+                 FROM ${TABLES.JOIN_CONTESTS} 
+                 WHERE match_id = ? 
+                 AND contest_id = ? 
+                 AND user_id = ?) as joined_teams,
+                
+                -- User customer type
+                (SELECT customer_type 
+                 FROM ${TABLES.USERS} 
+                 WHERE id = ? 
+                 LIMIT 1) as customer_type
+                
+            FROM ${TABLES.CREATE_CONTESTS} cc
+            INNER JOIN ${TABLES.MATCHES} m ON cc.match_id = m.match_id
+            
+            WHERE cc.id = ? 
+            AND cc.match_id = ?
+            LIMIT 1
+        `;
+
+        const result = await queryOne(query, [
+            userId,           // wallet
+            matchId, userId,  // total_teams
+            matchId, contestId, userId,  // joined_teams
+            userId,           // customer_type
+            contestId, matchId
+        ]);
+
+        return result;
+    } catch (error) {
+        logError(error, { context: 'getJoinStatusAtomic', matchId, contestId, userId });
+        return null;
+    }
+};
+
+/**
+ * Get available teams (not yet joined in this contest)
+ * Returns minimal data (just IDs for client-side filtering)
+ */
+const getAvailableTeams = async (matchId, contestId, userId) => {
+    try {
+        const query = `
+            SELECT ct.id as team_id
+            FROM ${TABLES.CREATE_TEAMS} ct
+            WHERE ct.match_id = ?
+            AND ct.user_id = ?
+            AND ct.id NOT IN (
+                SELECT created_team_id 
+                FROM ${TABLES.JOIN_CONTESTS}
+                WHERE match_id = ?
+                AND contest_id = ?
+                AND user_id = ?
+            )
+            ORDER BY ct.id DESC
+            LIMIT 50
+        `;
+
+        const teams = await queryAll(query, [
+            matchId, userId,
+            matchId, contestId, userId
+        ]);
+
+        return teams.map(t => t.team_id);
+    } catch (error) {
+        logError(error, { context: 'getAvailableTeams', matchId, contestId, userId });
+        return [];
+    }
+};
+
+/**
+ * Validate join eligibility and return action code
+ * @returns {Object} { action, message, can_join, available_team_count }
+ */
+const determineJoinAction = (data) => {
+    const currentTime = Math.floor(Date.now() / 1000);
+
+    if (currentTime >= data.timestamp_start) {
+        return {
+            action: 1,
+            message: 'Match time is up',
+            can_join: false,
+            available_team_count: 0
+        };
+    }
+
+    if (!data.contest_id || data.is_cancelled === 1) {
+        return {
+            action: 1,
+            message: 'Invalid Contest',
+            can_join: false,
+            available_team_count: 0
+        };
+    }
+
+    if (data.customer_type === 9 && data.total_spots < 100) {
+        return {
+            action: 1,
+            message: 'Something went wrong please contact Support for help',
+            can_join: false,
+            available_team_count: 0
+        };
+    }
+
+    if (data.total_spots > 0 && data.filled_spot >= data.total_spots) {
+        return {
+            action: 3,
+            message: 'Contest is full',
+            can_join: false,
+            available_team_count: 0
+        };
+    }
+
+    if (parseFloat(data.entry_fees) > parseFloat(data.wallet_balance)) {
+        return {
+            action: 1,
+            message: 'Insufficient wallet balance',
+            can_join: false,
+            available_team_count: 0
+        };
+    }
+
+    const availableTeams = data.total_teams - data.joined_teams;
+
+    if (data.total_teams === 0) {
+        return {
+            action: 1,
+            message: 'Create new team to join this contest',
+            can_join: false,
+            available_team_count: 0
+        };
+    }
+
+    if (availableTeams > 0) {
+        return {
+            action: 2,
+            message: 'Join contest',
+            can_join: true,
+            available_team_count: availableTeams
+        };
+    }
+
+    return {
+        action: 1,
+        message: 'Create new team to join this contest',
+        can_join: false,
+        available_team_count: 0
+    };
+};
+
+/**
+ * Main function: Join contest status
+ */
+const getJoinContestStatus = async (matchId, contestId, userId) => {
+    const startTime = Date.now();
+
+    try {
+        const cacheKey = CACHE_KEYS.JOIN_STATUS(matchId, contestId, userId);
+
+        return await cache.cacheAside(
+            cacheKey,
+            async () => {
+                const data = await getJoinStatus(matchId, contestId, userId);
+
+                if (!data) {
+                    return {
+                        status: false,
+                        code: 201,
+                        message: 'Invalid Contest or Match',
+                        action: 1,
+                        team_list: null
+                    };
+                }
+
+                const result = determineJoinAction(data);
+
+                let teamList = null;
+                if (result.can_join && result.available_team_count > 0) {
+                    const availableTeamIds = await getAvailableTeams(
+                        matchId, contestId, userId
+                    );
+
+                    if (availableTeamIds.length > 0) {
+                        teamList = [{
+                            open_team: availableTeamIds
+                        }];
+                    }
+                }
+
+                const response = {
+                    status: true,
+                    code: 200,
+                    message: result.message,
+                    action: result.action,
+                    team_list: teamList,
+                    available_teams: result.available_team_count,
+                    _meta: {
+                        processing_time_ms: Date.now() - startTime
+                    }
+                };
+
+                logger.info('Join status checked', {
+                    matchId,
+                    contestId,
+                    userId,
+                    action: result.action,
+                    duration: Date.now() - startTime
+                });
+
+                return response;
+            },
+            CACHE_EXPIRY.THIRTY_SECONDS
+        );
+
+    } catch (error) {
+        logError(error, { context: 'getJoinContestStatus', matchId, contestId, userId });
+
+        return {
+            status: false,
+            code: 500,
+            message: 'Failed to check join status',
+            action: 1,
+            team_list: null,
+            _meta: {
+                processing_time_ms: Date.now() - startTime,
+                error: true
+            }
+        };
+    }
+};
+
 module.exports = {
     getContestsByMatch,
     getAllContestsByMatch,
     getMyContests,
+    getJoinContestStatus,
 };

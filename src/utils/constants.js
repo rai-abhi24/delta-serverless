@@ -21,7 +21,7 @@ module.exports = {
             LIVE: 3,
             ABANDONED: 4
         },
-        PLAYER_ROLES:{
+        PLAYER_ROLES: {
             BATSMAN: 'bat',
             BOWLER: 'bowl',
             ALL_ROUNDER: 'all',
@@ -114,6 +114,7 @@ module.exports = {
         PLAYERS: (matchId) => `plyr:${matchId}`,
         LINEUP_STATUS: (matchId) => `lineup:${matchId}`,
         TEAM_HASH: (matchId, userId, teamHash) => `hash:team:${matchId}:${userId}:${teamHash}`,
+        JOIN_STATUS: (matchId, contestId, userId) =>`join:status:${matchId}:${contestId}:${userId}`,
     },
 
     CACHE_EXPIRY: {

@@ -196,12 +196,12 @@ const get = async (key) => {
             return null;
         }
 
-        let parsed;
-        if (value.startsWith('{') || value.startsWith('[')) {
-            parsed = JSON.parse(value);
-        } else {
-            parsed = await maybeDecompress(value, true);
-        }
+        const parsed = JSON.parse(value);
+        // if (value.startsWith('{') || value.startsWith('[')) {
+        //     parsed = JSON.parse(value);
+        // } else {
+        //     parsed = await maybeDecompress(value, true);
+        // }
 
         if (parsed) {
             setInMemory(key, parsed);
@@ -236,7 +236,8 @@ const set = async (key, value, ttlSeconds = 300) => {
             return false;
         }
 
-        const { data, compressed } = await maybeCompress(value);
+        // const { data, compressed } = await maybeCompress(value);
+        const { data, compressed } = { data: value, compressed: false };
 
         // Using pipeline for better performance
         const pipeline = redis.pipeline();

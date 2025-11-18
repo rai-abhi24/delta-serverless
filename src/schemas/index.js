@@ -236,3 +236,14 @@ exports.getPlayerSchema = {
         }
     }
 };
+
+exports.getJoinContestSchema = {
+    body: {
+        type: 'object',
+        required: ['match_id', 'contest_id'],
+        properties: {
+            match_id: { type: 'string' },
+            contest_id: { type: 'string' }
+        }
+    }
+};
