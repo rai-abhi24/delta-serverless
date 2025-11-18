@@ -652,13 +652,14 @@ const createTeamRecord = async (teamData, isUpdate = false) => {
 
             const result = await connection.execute(`
                 INSERT INTO ${TABLES.CREATE_TEAMS} 
-                (match_id, user_id, teams, captain, vice_captain, team_hash,
+                (match_id, user_id, team_id, teams, captain, vice_captain, team_hash,
                  team_count, create_team_time, update_team_time, expert_user_id,
                  expert_team_id, contest_id, edit_team_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     teamData.match_id,
                     teamData.user_id,
+                    teamData.team_id ? JSON.stringify(teamData.team_id) : null,
                     JSON.stringify(teamData.teams),
                     teamData.captain,
                     teamData.vice_captain,
@@ -667,8 +668,8 @@ const createTeamRecord = async (teamData, isUpdate = false) => {
                     now,
                     now,
                     teamData.expert_user_id || 0,
-                    teamData.expert_team_id || 0,
-                    teamData.contest_id || 0,
+                    teamData.expert_team_id || null,
+                    teamData.contest_id || null,
                     0
                 ]
             );

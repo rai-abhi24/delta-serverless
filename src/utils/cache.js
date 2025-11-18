@@ -237,7 +237,7 @@ const set = async (key, value, ttlSeconds = 300) => {
         }
 
         // const { data, compressed } = await maybeCompress(value);
-        const { data, compressed } = { data: value, compressed: false };
+        const { data, compressed } = { data: JSON.stringify(value), compressed: false };
 
         // Using pipeline for better performance
         const pipeline = redis.pipeline();
