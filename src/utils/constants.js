@@ -13,6 +13,7 @@ module.exports = {
             T20: 6,
             WOMEN_ODI: 7,
             WOMEN_T20: 8,
+            T10: 17,
         },
         MATCH_STATUS: {
             IN_REVIEW: 0,
@@ -107,14 +108,14 @@ module.exports = {
         PAYMENT_GATEWAYS: (platform) => `pay:gtw:${platform}`,
 
         MATCH_SQUAD: (matchId) => `meta:squad:${matchId}`,
-        PLAYER_IMAGE: (playerId) => `img:plyr:${playerId}`,
+        PLAYER_IMAGE: (playerId) => `img:{playerImg}:${playerId}`,
         PRIZE_BREAKUP: (matchId, contestId) => `pbr:${matchId}:${contestId}`,
         LEADERBOARD: (matchId, contestId, userId, page) => `leaderboard:${matchId}:${contestId}:${userId}:${page}`,
 
         PLAYERS: (matchId) => `plyr:${matchId}`,
         LINEUP_STATUS: (matchId) => `lineup:${matchId}`,
         TEAM_HASH: (matchId, userId, teamHash) => `hash:team:${matchId}:${userId}:${teamHash}`,
-        JOIN_STATUS: (matchId, contestId, userId) =>`join:status:${matchId}:${contestId}:${userId}`,
+        JOIN_STATUS: (matchId, contestId, userId) => `join:status:${matchId}:${contestId}:${userId}`,
     },
 
     CACHE_EXPIRY: {

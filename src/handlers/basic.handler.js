@@ -31,10 +31,46 @@ exports.apkUpdateHandler = async (request, reply) => {
 
         const { version_code, os_type } = request.body || {};
 
-        const result = await apkUpdateService.checkApkUpdate({
-            version_code,
-            os_type,
-        });
+        const result = {
+            "force_update": false,
+            "splashScreen": "",
+            "status": false,
+            "code": 201,
+            "message": "1ht9QnlHWkS3dJ6PMALD",
+            "title": null,
+            "url": null,
+            "release_note": null,
+            "promotion": [
+                {
+                    "id": 41,
+                    "title": "ADD",
+                    "url": "https://panel.onex11.com/uploads/banners/2025-10-16/banner_1760605136.jpeg",
+                    "actiontype": null,
+                    "photo": "uploads/banners/2025-10-16/banner_1760605136.jpeg",
+                    "description": "dqwas",
+                    "type": "Promotion",
+                    "sort_by": 0,
+                    "status": 1,
+                    "created_at": "2025-09-24 13:39:04",
+                    "updated_at": "2025-10-16 14:28:56"
+                }
+            ],
+            "ads_setting": null,
+            "isLudoActive": 0,
+            "isClassicLudoActive": 0,
+            "isOnexLudoActive": 0,
+            "isQuickLudoActive": 0,
+            "isPlayStoreBuild": 1,
+            "activeSports": {
+                "cricket": 1,
+                "football": 1,
+                "kabaddi": 2
+            },
+        }
+        // const result = await apkUpdateService.checkApkUpdate({
+        //     version_code,
+        //     os_type,
+        // });
 
         result.whatsAppLink = result.whatsAppLink || 'https://t.me/delta11admin';
 

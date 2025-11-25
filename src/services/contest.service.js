@@ -1,7 +1,7 @@
 /**
  * Contest Service - Handles operations related to contests
  */
-
+const crypto = require("crypto");
 const config = require('../config');
 const cache = require('../utils/cache');
 const teamService = require('./team.service');
@@ -10,6 +10,8 @@ const { queryAll, queryOne, executeTransaction } = require('../config/database')
 const { logError, logger } = require('../utils/logger');
 const { TABLES } = require('../utils/tablesNames');
 const { MATCH_STATUS } = CRICKET;
+
+const trace = () => crypto.randomBytes(6).toString("hex");
 
 /**
  * Validate match and check if it's still open for joining
@@ -802,7 +804,7 @@ const transformMyContest = (contest, userId) => {
     // Parse joined teams JSON
     let joinedTeams = [];
     try {
-        joinedTeams = contest.joined_teams ? JSON.parse(contest.joined_teams) : [];
+        joinedTeams = contest.joined_teams?.length ? contest.joined_teams : [];
     } catch (e) {
         logError(e, { context: 'parseJoinedTeams', contestId: contest.contest_id });
     }
@@ -811,16 +813,8 @@ const transformMyContest = (contest, userId) => {
 
     return {
         contestId: contest.contest_id,
-        contest_type_id: contest.contest_type,
-
-        // Contest metadata
         contestTitle: contest.is_private === 1 ? contest.contest_title : contest.contest_type,
         contestSubTitle: contest.contest_subtitle,
-        tnc_url: contest.tnc_url,
-        inv_url: contest.inv_url,
-        free_wheel_count: contest.free_wheel_count,
-
-        // Contest details
         entryFees: contest.entry_fees,
         max_fees: contest.max_fees,
         totalSpots: contest.total_spots,
@@ -828,35 +822,24 @@ const transformMyContest = (contest, userId) => {
         filledSpots,
         totalWinningPrize,
         firstPrice,
-
-        // Contest properties
         winnerPercentage: contest.winner_percentage,
         winnerCount: contest.prize_percentage,
         maxAllowedTeam: contest.max_entries,
         maxEntries: contest.max_entries,
         usable_bonus: contest.usable_bonus,
-
-        // Flags
         bonus_contest: contest.bonus_contest === 1,
-        is_flexible: contest.is_flexible === 1,
-        is_bte: contest.is_bte === 1,
+        is_flexible: contest.is_flexible,
+        is_bte: contest.is_bte,
         is_public: 0,
         is_private: contest.is_private,
         is_private_creater: isPrivateCreator ? 1 : 0,
         private_contest_code: contest.coupon_code,
         is_gadget_based: contest.is_gadget_based,
         isCancelled: contest.is_cancelled === 1,
-        cancellation: contest.cancellation === 1,
-
-        // Additional fields
-        sort_by: contest.sort_by,
+        cancellation: contest.cancellation === "1",
         extra_cash: contest.extra_cash,
-
-        // Teams
         no_of_users_team: joinedTeams.length,
         joinedTeams,
-
-        // Expert data
         ...(contest.is_bte === 1 && contest.expert_image && {
             expert_image: contest.expert_image.startsWith('http')
                 ? contest.expert_image
@@ -958,7 +941,7 @@ const getMyContests = async (matchId, userId, versionCode = null) => {
     }
 };
 
-/* --------------------- Join Contest --------------------- */
+/* ------------------ Get Join Contest Status ------------------ */
 
 /**
  * Get join status
@@ -1102,7 +1085,7 @@ const determineJoinAction = (data) => {
 
     if (data.total_spots > 0 && data.filled_spot >= data.total_spots) {
         return {
-            status: false,
+            status: true,
             action: 3,
             message: 'Contest is full',
             can_join: false,
@@ -1124,7 +1107,7 @@ const determineJoinAction = (data) => {
 
     if (data.total_teams === 0) {
         return {
-            status: false,
+            status: true,
             action: 1,
             message: 'Create new team to join this contest',
             can_join: false,
@@ -1143,7 +1126,7 @@ const determineJoinAction = (data) => {
     }
 
     return {
-        status: false,
+        status: true,
         action: 1,
         message: 'Create new team to join this contest',
         can_join: false,
@@ -1178,7 +1161,7 @@ const getJoinContestStatus = async (matchId, contestId, userId) => {
                 const result = determineJoinAction(data);
 
                 let teamList = null;
-                if (result.can_join && result.available_team_count > 0) {
+                if (result.available_team_count > 0) {
                     const availableTeamIds = await getAvailableTeams(
                         matchId, contestId, userId
                     );
@@ -1231,9 +1214,483 @@ const getJoinContestStatus = async (matchId, contestId, userId) => {
     }
 };
 
+/* ------------------------ Join Contest ------------------------ */
+
+/**
+ * PRE-FLIGHT VALIDATION (parallel queries)
+ */
+const validateJoinRequest = async (userId, matchId, contestId, teamIds) => {
+    try {
+        const [user, match, contest] = await Promise.all([
+            queryOne(`SELECT id, name, team_name, customer_type FROM ${TABLES.USERS} WHERE id = ?`, [userId]),
+            queryOne(`SELECT match_id, timestamp_start, status FROM ${TABLES.MATCHES} WHERE match_id = ?`, [matchId]),
+            queryOne(`
+                SELECT cc.id, cc.entry_fees, cc.total_spots, cc.filled_spot, cc.usable_bonus,
+                    cc.extra_cash, cc.bonus_contest, cc.is_bte, ct.max_entries, cc.contest_type
+                FROM ${TABLES.CREATE_CONTESTS} cc
+                LEFT JOIN ${TABLES.CONTEST_TYPES} ct ON cc.contest_type = ct.id
+                WHERE cc.id = ?
+            `, [contestId])
+        ]);
+
+        if (!user) return { valid: false, error: { status: false, code: 201, message: 'Invalid user' } };
+        if (!match) return { valid: false, error: { status: false, code: 201, message: 'Invalid match' } };
+        if (!contest) return { valid: false, error: { status: false, code: 201, message: 'Invalid contest' } };
+
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (nowSec > Number(match.timestamp_start)) {
+            return { valid: false, error: { status: false, code: 201, message: 'Match time up' } };
+        }
+
+        const placeholders = teamIds.map(_ => '?').join(',');
+        const teamsQuery = `SELECT id, match_id, team_count FROM ${TABLES.CREATE_TEAMS} WHERE id IN (${placeholders}) AND user_id = ?`;
+        console.log(teamsQuery, teamIds);
+
+        const teamsParams = [...teamIds, userId];
+        const teams = await queryAll(teamsQuery, teamsParams);
+
+        if (!teams || teams.length !== teamIds.length) {
+            return { valid: false, error: { status: false, code: 201, message: 'Invalid team IDs or teams not owned by user' } };
+        }
+
+        const badTeam = teams.find(t => Number(t.match_id) !== Number(matchId));
+        if (badTeam) {
+            return { valid: false, error: { status: false, code: 201, message: 'One or more teams not valid for this match' } };
+        }
+
+        const existingJoinsRow = await queryOne(`SELECT COUNT(1) AS count FROM ${TABLES.JOIN_CONTESTS} WHERE contest_id = ? AND user_id = ?`, [contestId, userId]);
+
+        if (contest.total_spots > 0 && contest.filled_spot >= contest.total_spots) {
+            return { valid: false, error: { status: false, code: 201, message: 'Contest is already full' } };
+        }
+
+        // wallet summary for pre-check - but note: this is only indicative; actual deductions validated inside txn
+        // Sum wallet rows by payment_type
+        const walletSummary = await queryAll(`
+            SELECT payment_type, SUM(amount) AS amount_sum
+            FROM ${TABLES.WALLETS}
+            WHERE user_id = ? AND payment_type IN (3, 4)
+        `, [userId]);
+
+        const walletMap = {};
+        walletSummary.forEach(r => walletMap[r.payment_type] = Number(r.amount_sum || 0));
+
+        return {
+            valid: true,
+            data: {
+                user,
+                match,
+                contest,
+                teams,
+                walletMap,
+                existingJoinCount: existingJoinsRow?.count || 0
+            }
+        };
+    } catch (error) {
+        logError(error, { context: 'validateJoinRequest' });
+        return { valid: false, error: { status: false, code: 500, message: 'Validation failed' } };
+    }
+};
+
+/**
+ * Calculate cost for ONE team
+ */
+const calculatePerTeamCost = (entryFee, usableBonusPercent, extraCashPercent, isBonusContest) => {
+    if (!entryFee || Number(entryFee) === 0) {
+        return { totalCost: 0, bonus: 0, extraCash: 0, cash: 0 };
+    }
+
+    const totalCost = Number(entryFee);
+
+    if (isBonusContest) {
+        return { totalCost, bonus: totalCost, extraCash: 0, cash: 0 };
+    }
+
+    const bonus = Number((totalCost * (usableBonusPercent || 0) / 100).toFixed(2));
+    let remaining = Number((totalCost - bonus).toFixed(2));
+
+    const extraCash = Number((remaining * (extraCashPercent || 0) / 100).toFixed(2));
+    remaining = Number((remaining - extraCash).toFixed(2));
+
+    return { totalCost, bonus, extraCash, cash: remaining };
+};
+
+/**
+ * DEDUCT FROM WALLETS (atomic, within transaction)
+ */
+const deductForSingleTeam = async (connection, walletRows, cost) => {
+    // Build map and in-memory amounts
+    const walletMap = {};
+    walletRows.forEach(r => walletMap[r.payment_type] = { id: r.id, amount: Number(r.amount || 0) });
+
+    // Track deductions
+    let rem = Number(cost.totalCost || 0);
+    const ded = { bonus: 0, extraCash: 0, deposit: 0, prize: 0 };
+
+    // Bonus first (type 1)
+    if (cost.bonus > 0 && walletMap[1]?.amount > 0) {
+        const take = Math.min(cost.bonus, walletMap[1].amount, rem);
+        if (take > 0) {
+            await connection.execute(`
+                INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
+                (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            `, [walletRows[0]?.user_id, take, 1, 'EntryFee-Bonus', null, '-', 'success']); // transaction_id null here - you can populate
+            await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[1].id]);
+            walletMap[1].amount -= take;
+            rem = Number((rem - take).toFixed(2));
+            ded.bonus += take;
+        }
+    }
+
+    // Extra cash (type 9)
+    if (cost.extraCash > 0 && walletMap[9]?.amount > 0 && rem > 0) {
+        const take = Math.min(cost.extraCash, walletMap[9].amount, rem);
+        if (take > 0) {
+            await connection.execute(`
+                INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
+                (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            `, [walletRows[0]?.user_id || null, take, 9, 'EntryFee-ExtraCash', null, '-', 'success']);
+            await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[9].id]);
+            walletMap[9].amount -= take;
+            rem = Number((rem - take).toFixed(2));
+            ded.extraCash += take;
+        }
+    }
+
+    // Deposit (type 3)
+    if (rem > 0 && walletMap[3]?.amount > 0) {
+        const take = Math.min(rem, walletMap[3].amount);
+        if (take > 0) {
+            await connection.execute(`
+                INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
+                (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            `, [walletRows[0]?.user_id || null, take, 3, 'EntryFee-Deposit', null, '-', 'success']);
+            await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[3].id]);
+            walletMap[3].amount -= take;
+            rem = Number((rem - take).toFixed(2));
+            ded.deposit += take;
+        }
+    }
+
+    // Prize (type 4) last
+    if (rem > 0 && walletMap[4]?.amount > 0) {
+        const take = Math.min(rem, walletMap[4].amount);
+        if (take > 0) {
+            await connection.execute(`
+                INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
+                (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            `, [walletRows[0]?.user_id || null, take, 4, 'EntryFee-Prize', null, '-', 'success']);
+            await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[4].id]);
+            walletMap[4].amount -= take;
+            rem = Number((rem - take).toFixed(2));
+            ded.prize += take;
+        }
+    }
+
+    if (rem > 0.001) {
+        throw new Error('INSUFFICIENT_BALANCE_IN_TXN');
+    }
+
+    walletRows.forEach(w => {
+        if (walletMap[w.payment_type]) w.amount = walletMap[w.payment_type].amount;
+    });
+
+    return ded;
+};
+
+/**
+ * Insert JOIN record (single)
+ */
+const insertJoinRecord = async (connection, payload) => {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+    await connection.execute(`
+        INSERT INTO ${TABLES.JOIN_CONTESTS}
+        (user_id, match_id, contest_id, created_team_id, team_count, user_name, team_name,
+        entry_fees, entryfee_bonus, entryfee_deposit, entryfee_winning, entryfee_extracash,
+        customer_type, is_bte, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        payload.userId,
+        payload.matchId,
+        payload.contestId,
+        payload.teamId,
+        payload.team_count,
+        payload.user_name,
+        payload.team_name,
+        payload.entry_fee,
+        payload.entryfee_bonus,
+        payload.entryfee_deposit,
+        payload.entryfee_winning,
+        payload.entryfee_extracash,
+        payload.customer_type,
+        payload.is_bte ? 1 : 0,
+        now,
+        now
+    ]);
+};
+
+/**
+ * INVALIDATE CACHE (async, non-blocking)
+ */
+const doInvalidateCache = async (userId, matchId) => {
+    try {
+        await Promise.all([
+            cache.del(CACHE_KEYS.USER_CONTESTS(matchId, userId)),
+            cache.del(CACHE_KEYS.MY_CONTESTS(matchId, userId)),
+            cache.del(CACHE_KEYS.CONTEST_FEED(matchId, 1)),
+            cache.del(CACHE_KEYS.CONTEST_CATALOG(matchId)),
+        ]);
+    } catch (err) {
+        logError(err, { context: 'doInvalidateCache' });
+    }
+};
+
+const simulateSingleTeam = (rows, costObj) => {
+    // helper local similar to deductForSingleTeam but only simulate on rows
+    const map = {};
+    rows.forEach(r => map[r.payment_type] = r);
+    let rem = Number(costObj.totalCost || 0);
+    // bonus
+    if (costObj.bonus > 0 && map[1]?.amount > 0) {
+        const t = Math.min(costObj.bonus, map[1].amount, rem);
+        map[1].amount = Number((map[1].amount - t).toFixed(2)); rem -= t;
+    }
+    // extra 9
+    if (costObj.extraCash > 0 && map[9]?.amount > 0 && rem > 0) {
+        const t = Math.min(costObj.extraCash, map[9].amount, rem);
+        map[9].amount = Number((map[9].amount - t).toFixed(2)); rem -= t;
+    }
+    // deposit 3
+    if (rem > 0 && map[3]?.amount > 0) {
+        const t = Math.min(rem, map[3].amount);
+        map[3].amount = Number((map[3].amount - t).toFixed(2)); rem -= t;
+    }
+    // prize 4
+    if (rem > 0 && map[4]?.amount > 0) {
+        const t = Math.min(rem, map[4].amount);
+        map[4].amount = Number((map[4].amount - t).toFixed(2)); rem -= t;
+    }
+    return rem <= 0.001;
+}
+
+/**
+ * Join contest
+ * Uses database-level locking and atomic operations
+ */
+const joinContest = async (userId, matchId, contestId, teamIds) => {
+    const traceId = trace();
+    const startTime = Date.now();
+
+    logger.info({ traceId, step: "INIT", userId, matchId, contestId, teamIds }, "joinContest start");
+
+    // 1. Validation
+    const validation = await validateJoinRequest(userId, matchId, contestId, teamIds);
+    logger.info({ traceId, step: "VALIDATION_RESULT", validation }, "Validation completed");
+
+    if (!validation.valid) {
+        logger.warn({ traceId, step: "VALIDATION_FAILED", validation }, "Join request validation failed");
+        return validation.error;
+    }
+
+    const { user, contest, teams } = validation.data;
+
+    // Calculate cost per team
+    const perTeamCost = calculatePerTeamCost(
+        contest.entry_fees,
+        contest.usable_bonus,
+        contest.extra_cash,
+        contest.bonus_contest
+    );
+    logger.info({ traceId, step: "COST_CALCULATED", perTeamCost }, "Per team cost calculated");
+
+    try {
+        const result = await executeTransaction(async (connection) => {
+            logger.info({ traceId, step: "LOCK_CONTEST", contestId }, "Locking contest row");
+
+            const [lockedContestRows] = await connection.execute(`
+                SELECT id, total_spots, filled_spot
+                FROM ${TABLES.CREATE_CONTESTS}
+                WHERE id = ? FOR UPDATE
+            `, [contestId]);
+
+            const lockedContest = lockedContestRows[0];
+            logger.info({ traceId, step: "CONTEST_LOCKED", lockedContest }, "Contest row locked");
+
+            if (!lockedContest) throw new Error("CONTEST_NOT_FOUND");
+
+            // spot checks
+            const spotsNeeded = teamIds.length;
+            const spotsAvailable = lockedContest.total_spots === 0
+                ? Number.MAX_SAFE_INTEGER
+                : (lockedContest.total_spots - lockedContest.filled_spot || 0);
+
+            logger.info({ traceId, step: "SPOT_CHECK", spotsNeeded, spotsAvailable }, "Checking available spots");
+
+            if (spotsAvailable <= 0) throw new Error("CONTEST_FULL");
+            if (spotsNeeded > spotsAvailable) throw new Error("INSUFFICIENT_SPOTS");
+
+
+            // --- LOCK USER WALLET ---
+            logger.info({ traceId, step: "LOCK_WALLET", userId }, "Locking user wallet rows");
+
+            const [walletRowsRes] = await connection.execute(`
+                SELECT id, user_id, payment_type, amount
+                FROM ${TABLES.WALLETS}
+                WHERE user_id = ? FOR UPDATE
+            `, [userId]);
+
+            const walletRows = walletRowsRes.map(r => ({
+                id: r.id,
+                user_id: r.user_id,
+                payment_type: r.payment_type,
+                amount: Number(r.amount || 0)
+            }));
+
+            logger.info({ traceId, step: "WALLET_LOCKED", walletRows }, "Wallet rows locked");
+
+
+            // --- SIMULATE FUNDS ---
+            logger.info({ traceId, step: "SIMULATING_FUNDS", walletRows, perTeamCost }, "Simulating wallet deductions");
+
+            let walletRowsClone = JSON.parse(JSON.stringify(walletRows));
+            for (let i = 0; i < teamIds.length; i++) {
+                const ok = simulateSingleTeam(walletRowsClone, perTeamCost);
+                logger.info({ traceId, step: "SIMULATION_RESULT", teamIndex: i, ok, walletRowsClone }, "Simulation result");
+
+                if (!ok) throw new Error("INSUFFICIENT_BALANCE");
+            }
+
+
+            // --- PROCESS TEAMS ---
+            const joined = [];
+
+            for (const teamId of teamIds) {
+                logger.info({ traceId, step: "CHECK_DUPLICATE", teamId }, "Checking if team already joined");
+
+                const [existsRows] = await connection.execute(`
+                    SELECT 1 FROM ${TABLES.JOIN_CONTESTS}
+                    WHERE contest_id = ? AND created_team_id = ? LIMIT 1
+                `, [contestId, teamId]);
+
+                if (existsRows[0]) {
+                    logger.warn({ traceId, step: "DUPLICATE_FOUND", teamId }, "Team already joined this contest");
+                    throw new Error("TEAM_ALREADY_JOINED");
+                }
+
+                const teamObj = teams.find(t => Number(t.id) === Number(teamId));
+                const team_count = teamObj?.team_count || "T1";
+
+                logger.info({ traceId, step: "DEDUCTING_FUNDS", teamId, perTeamCost }, "Deducting wallet funds");
+
+                const deductions = await deductForSingleTeam(connection, walletRows, perTeamCost);
+
+                logger.info({ traceId, step: "DEDUCTIONS_DONE", teamId, deductions }, "Wallet deduction completed");
+
+
+                // insert
+                logger.info({ traceId, step: "INSERT_JOIN", teamId }, "Inserting join record");
+
+                await insertJoinRecord(connection, {
+                    userId,
+                    matchId,
+                    contestId,
+                    teamId,
+                    team_count,
+                    user_name: user.name,
+                    team_name: user.team_name,
+                    entry_fee: perTeamCost.totalCost,
+                    entryfee_bonus: deductions.bonus,
+                    entryfee_deposit: deductions.deposit,
+                    entryfee_winning: deductions.prize,
+                    entryfee_extracash: deductions.extraCash,
+                    customer_type: user.customer_type || 0,
+                    is_bte: contest.is_bte || 0
+                });
+
+                logger.info({ traceId, step: "JOIN_INSERTED", teamId }, "Team join record inserted");
+
+                // update team join status
+                await connection.execute(
+                    `UPDATE ${TABLES.CREATE_TEAMS} SET team_join_status = 1 WHERE id = ?`,
+                    [teamId]
+                );
+
+                logger.info({ traceId, step: "TEAM_STATUS_UPDATED", teamId }, "Team join status updated");
+
+                joined.push(teamId);
+            }
+
+            // update contest filled_spot
+            if (joined.length > 0) {
+                logger.info({ traceId, step: "UPDATE_FILLED_SPOT", increment: joined.length }, "Updating filled_spot");
+
+                await connection.execute(`
+                    UPDATE ${TABLES.CREATE_CONTESTS}
+                    SET filled_spot = filled_spot + ?
+                    WHERE id = ?
+                `, [joined.length, contestId]);
+            }
+
+            logger.info({ traceId, step: "TXN_COMPLETE", joined }, "Transaction complete");
+
+            return { joinedTeams: joined, perTeamCost };
+        });
+
+        // post cache invalidation
+        setImmediate(() => {
+            logger.info({ traceId, step: "CACHE_INVALIDATE_START" }, "Invalidating cache...");
+            doInvalidateCache(userId, matchId).catch(err =>
+                logError(err, { traceId, context: "postJoinInvalidate" })
+            );
+        });
+
+        logger.info({
+            traceId,
+            step: "SUCCESS",
+            userId,
+            matchId,
+            contestId,
+            teamsJoined: result.joinedTeams.length,
+            durationMs: Date.now() - startTime
+        }, "joinContest success");
+
+        return {
+            status: true,
+            code: 200,
+            message: "Team(s) joined successfully",
+            teams_joined: result.joinedTeams.length,
+            cost_for_each_team: result.perTeamCost
+        };
+
+    } catch (error) {
+        logger.error({ traceId, step: "ERROR_CAUGHT", error }, "joinContest error");
+
+        if (error.message === "CONTEST_FULL") {
+            return { status: false, code: 201, message: "This contest is already full" };
+        }
+        if (error.message === "INSUFFICIENT_SPOTS") {
+            return { status: false, code: 201, message: "Not enough spots available" };
+        }
+        if (error.message === "INSUFFICIENT_BALANCE" || error.message === "INSUFFICIENT_BALANCE_IN_TXN") {
+            return { status: false, code: 201, message: "Insufficient balance" };
+        }
+        if (error.message === "TEAM_ALREADY_JOINED") {
+            return { status: false, code: 201, message: "This team has already joined this contest" };
+        }
+
+        throw error;
+    }
+};
+
 module.exports = {
     getContestsByMatch,
     getAllContestsByMatch,
     getMyContests,
     getJoinContestStatus,
+    joinContest,
 };

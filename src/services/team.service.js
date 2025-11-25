@@ -545,7 +545,7 @@ const validatePlayers = async (matchId, playerIds) => {
  * Validate team composition rules
  */
 const validateTeamComposition = (players, captainId, viceCaptainId, matchFormat) => {
-    const teamSize = [17, 21].includes(matchFormat) ? 6 : 11;
+    const teamSize = matchFormat == 21 ? 6 : 11;
     const rules = TEAM_RULES[teamSize];
 
     if (players.length !== rules.total) {

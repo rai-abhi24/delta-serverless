@@ -4,7 +4,7 @@ const { authenticate } = require('../../middlewares/auth.middleware');
 const { bannerHandler } = require('../../handlers/banner.handler');
 const { getMatchHandler, getMatchHistoryHandler } = require('../../handlers/match.handler');
 const { apkUpdateHandler, getStoriesHandler, getRecentWinnersHandler, deviceNotificationHandler } = require('../../handlers/basic.handler');
-const { getContestByMatchHandler, getMyContestHandler, getAllContestByMatchHandler, joinContestStatusHandler } = require('../../handlers/contest.handler');
+const { getContestByMatchHandler, getMyContestHandler, getAllContestByMatchHandler, joinContestStatusHandler, joinContestHandler } = require('../../handlers/contest.handler');
 const { loginHandler, logoutHandler } = require('../../handlers/auth.handler');
 const { getWalletHandler } = require('../../handlers/wallet.handler');
 const { getMyTeamHandler, createTeamHandler } = require('../../handlers/team.handler');
@@ -39,6 +39,7 @@ module.exports = async (app) => {
     app.post("/getAllContestByMatch", { preHandler: authenticate, schema: schemas.getContestByMatchSchema }, getAllContestByMatchHandler);
     app.post("/getMyContest", { preHandler: authenticate, schema: schemas.getMyContestSchema }, getMyContestHandler);
     app.post("/joinNewContestStatus", { preHandler: authenticate, schema: schemas.getJoinContestSchema }, joinContestStatusHandler);
+    app.post("/joinContest", { preHandler: authenticate, schema: schemas.getJoinContestSchema }, joinContestHandler);
 
     /* Prize Breakup routes */
     app.post("/getPrizeBreakup", { preHandler: authenticate, schema: schemas.prizeBreakupSchema }, prizeBreakupHandler);

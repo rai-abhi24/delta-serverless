@@ -197,3 +197,43 @@ exports.joinContestStatusHandler = async (request, reply) => {
         return error(reply, 'Failed to check join status', 500);
     }
 };
+
+/**
+ * Join contest handler
+ */
+exports.joinContestHandler = async (request, reply) => {
+    const startTime = Date.now();
+
+    try {
+        const { match_id, contest_id, created_team_id } = request.body || {};
+        const { id: user_id } = request.user;
+
+        if (!match_id) return error(reply, 'match_id is required', 400);
+        if (!contest_id) return error(reply, 'contest_id is required', 400);
+        if (!created_team_id || !Array.isArray(created_team_id) || created_team_id.length === 0) {
+            return error(reply, 'created_team_id array is required', 400);
+        }
+
+        const result = await contestService.joinContest(
+            user_id,
+            match_id,
+            contest_id,
+            created_team_id
+        );
+
+        if (result._meta) {
+            result._meta.total_request_time_ms = Date.now() - startTime;
+        }
+
+        return success(reply, result, result.code || 200);
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            body: request.body,
+            duration: Date.now() - startTime
+        }, 'Error in joinContest handler');
+
+        return error(reply, 'Failed to join contest', 500);
+    }
+};
