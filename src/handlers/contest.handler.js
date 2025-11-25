@@ -57,6 +57,45 @@ exports.getContestByMatchHandler = async (request, reply) => {
 };
 
 /**
+ * Get contests by type
+ */
+exports.getContestByTypeHandler = async (request, reply) => {
+    const startTime = Date.now();
+
+    try {
+        const page = parseInt(request.query.page) || 1;
+        const { id: user_id } = request?.user || {};
+        const { match_id, contest_type_id } = request.body || {};
+
+        if (!match_id) return error(reply, 'match_id is required', 400);
+        if (!contest_type_id) return error(reply, 'contest_type_id is required', 400);
+        if (!user_id) return error(reply, 'user_id is required', 400);
+
+        const result = await contestService.getContestsByType(
+            match_id,
+            contest_type_id,
+            user_id,
+            page
+        );
+
+        if (result._meta) {
+            result._meta.total_request_time_ms = Date.now() - startTime;
+        }
+
+        return success(reply, result, result.code || 200);
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            body: request.body,
+            duration: Date.now() - startTime,
+        }, 'Error in getContestByType handler');
+
+        return error(reply, 'Failed to fetch contests', 500);
+    }
+};
+
+/**
  * Get all contests by match
  */
 exports.getAllContestByMatchHandler = async (request, reply) => {
@@ -167,12 +206,6 @@ exports.joinContestStatusHandler = async (request, reply) => {
         if (!user_id) {
             return error(reply, 'user_id is required', 400);
         }
-
-        setImmediate(() => {
-            userService.updateLastActive(user_id).catch(err => {
-                logger.warn({ userId: user_id, error: err.message });
-            });
-        });
 
         const result = await contestService.getJoinContestStatus(
             match_id,

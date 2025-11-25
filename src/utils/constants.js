@@ -116,6 +116,7 @@ module.exports = {
         LINEUP_STATUS: (matchId) => `lineup:${matchId}`,
         TEAM_HASH: (matchId, userId, teamHash) => `hash:team:${matchId}:${userId}:${teamHash}`,
         JOIN_STATUS: (matchId, contestId, userId) => `join:status:${matchId}:${contestId}:${userId}`,
+        CONTEST_BY_TYPE: (matchId, contestTypeId, userId) => `cont:type:${matchId}:${contestTypeId}:${userId}`,
     },
 
     CACHE_EXPIRY: {

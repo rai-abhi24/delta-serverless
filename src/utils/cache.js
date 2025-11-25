@@ -37,7 +37,7 @@ const getRedisClient = async () => {
     // Create new connection
     redisConnectionPromise = (async () => {
         try {
-            const client = new Redis({
+            const clientOptions = {
                 host: config.redis.host,
                 port: config.redis.port,
                 password: config.redis.password,
@@ -46,14 +46,19 @@ const getRedisClient = async () => {
                 connectTimeout: config.redis.connectTimeout,
                 commandTimeout: config.redis.commandTimeout,
                 retryStrategy: config.redis.retryStrategy,
-                // tls: config.redis.tls,
                 enableReadyCheck: false,
                 enableOfflineQueue: false,
                 lazyConnect: false,
                 maxRetriesPerRequest: 1,
                 enableAutoPipelining: true,
                 autoPipeliningIgnoredCommands: ['ping'],
-            });
+            }
+
+            if (config.isProduction) {
+                clientOptions.tls = config.redis.tls;
+            };
+
+            const client = new Redis(clientOptions);
 
             client.on('error', (error) => {
                 logError(error, { context: 'redis_client' });

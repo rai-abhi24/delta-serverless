@@ -14,9 +14,9 @@ const { MATCH_STATUS } = CRICKET;
 const trace = () => crypto.randomBytes(6).toString("hex");
 
 /**
- * Validate match and check if it's still open for joining
+ * Get match metadata
  */
-const validateMatchTiming = async (matchId) => {
+const getMatchMeta = async (matchId) => {
     try {
         const cacheKey = CACHE_KEYS.MATCH_META(matchId);
 
@@ -36,7 +36,7 @@ const validateMatchTiming = async (matchId) => {
             CACHE_EXPIRY.ONE_DAY
         );
     } catch (error) {
-        logError(error, { context: 'validateMatchTiming', matchId });
+        logError(error, { context: 'getMatchMeta', matchId });
         return null;
     }
 };
@@ -349,7 +349,7 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
             return cached;
         }
 
-        const match = await validateMatchTiming(matchId);
+        const match = await getMatchMeta(matchId);
 
         if (!match) {
             return {
@@ -530,7 +530,7 @@ const getMatchContests = async (matchId, page = 1, limit = 10) => {
 const getAllContestsByMatch = async (matchId, userId, page = 1) => {
     try {
         const perPage = 20;
-        const match = await validateMatchTiming(matchId);
+        const match = await getMatchMeta(matchId);
 
         if (!match) {
             return {
@@ -855,7 +855,7 @@ const getMyContests = async (matchId, userId, versionCode = null) => {
     const startTime = Date.now();
 
     try {
-        const match = await validateMatchTiming(matchId);
+        const match = await getMatchMeta(matchId);
 
         if (!match) {
             return {
@@ -1687,10 +1687,253 @@ const joinContest = async (userId, matchId, contestId, teamIds) => {
     }
 };
 
+/* ---------------------- Get Contests By Type ---------------------- */
+
+/**
+ * Get contests by specific type - paginated
+ */
+const getContestsByType = async (matchId, contestTypeId, userId, page = 1) => {
+    const startTime = Date.now();
+    const perPage = 20;
+
+    try {
+        const match = await getMatchMeta(matchId);
+
+        if (!match) {
+            return {
+                system_time: Math.floor(Date.now() / 1000),
+                status: false,
+                code: 201,
+                message: 'match id is invalid'
+            };
+        }
+
+        const currentTime = Math.floor(Date.now() / 1000);
+        if (currentTime > match.timestamp_start) {
+            return {
+                system_time: currentTime,
+                status: false,
+                code: 201,
+                message: 'Match time up'
+            };
+        }
+
+        const cacheKey = `${CACHE_KEYS.CONTEST_BY_TYPE(matchId, contestTypeId, userId)}:p${page}`;
+
+        return await cache.cacheAside(
+            cacheKey,
+            async () => {
+                const contestType = await queryOne(`
+                    SELECT 
+                        ct.id as contest_type_id,
+                        ct.contest_type as contestTitle,
+                        ct.description as contestSubTitle,
+                        ct.free_wheel_count,
+                        ct.tnc_url,
+                        ct.inv_url,
+                        ct.is_bte,
+                        ct.is_gadget_based,
+                        ct.is_flexible
+                    FROM ${TABLES.CONTEST_TYPES} ct
+                    WHERE ct.id = ?
+                    AND ct.is_private = 0
+                    AND ct.is_deleted = 0
+                    AND EXISTS (
+                        SELECT 1 FROM ${TABLES.CREATE_CONTESTS} cc
+                        WHERE cc.contest_type = ct.id
+                        AND cc.match_id = ?
+                        LIMIT 1
+                    )
+                `, [contestTypeId, matchId]);
+
+                if (!contestType) {
+                    return {
+                        system_time: currentTime,
+                        status: false,
+                        code: 201,
+                        message: 'Contest type not found'
+                    };
+                }
+
+                if (contestType.is_bte === 1) {
+                    contestType.expert_image = 'https://panel.onex11.com/image/expert.jpg';
+                }
+
+                const offset = (page - 1) * perPage;
+
+                const [contests, countResult] = await Promise.all([
+                    queryAll(`
+                        SELECT 
+                            cc.id,
+                            cc.contest_type,
+                            cc.is_cancelled,
+                            cc.usable_bonus,
+                            cc.bonus_contest,
+                            cc.filled_spot,
+                            cc.fake_counter,
+                            cc.total_spots,
+                            cc.first_prize,
+                            cc.sort_by,
+                            cc.total_winning_prize,
+                            cc.extra_cash,
+                            cc.entry_fees,
+                            cc.mrp,
+                            cc.winner_percentage,
+                            cc.prize_percentage,
+                            cc.cancellation,
+                            cc.is_bte,
+                            cc.is_flexible,
+                            cc.is_private,
+                            cc.is_gadget_based,
+                            cc.expert_id,
+                            
+                            ct.max_entries,
+                            
+                            -- User joined count
+                            (SELECT COUNT(*) 
+                             FROM ${TABLES.JOIN_CONTESTS} jc
+                             WHERE jc.match_id = cc.match_id
+                             AND jc.contest_id = cc.id
+                             AND jc.user_id = ?
+                            ) as user_joined_count,
+                            
+                            -- Expert image (cached subquery)
+                            CASE 
+                                WHEN cc.is_bte = 1 THEN 
+                                    CONCAT('https://panel.onex11.com/', 
+                                        COALESCE(
+                                            (SELECT expert_image 
+                                             FROM ${TABLES.FANTASY_EXPERTS} 
+                                             WHERE user_id = cc.expert_id 
+                                             LIMIT 1),
+                                            'image/expert.jpg'
+                                        )
+                                    )
+                                ELSE NULL
+                            END as expert_image
+                            
+                        FROM ${TABLES.CREATE_CONTESTS} cc
+                        
+                        INNER JOIN ${TABLES.CONTEST_TYPES} ct 
+                            ON cc.contest_type = ct.id
+                        
+                        WHERE cc.match_id = ?
+                        AND cc.is_private = 0
+                        AND cc.contest_type = ?
+                        AND cc.is_cancelled = 0
+                        AND cc.filled_spot < cc.total_spots
+                        AND cc.deleted_at IS NULL
+                        
+                        ORDER BY cc.entry_fees DESC
+                        
+                        LIMIT ${perPage} OFFSET ${offset}
+                    `, [userId, matchId, contestTypeId]),
+
+                    queryOne(`
+                        SELECT COUNT(*) as total
+                        FROM ${TABLES.CREATE_CONTESTS}
+                        WHERE match_id = ?
+                        AND is_private = 0
+                        AND contest_type = ?
+                        AND is_cancelled = 0
+                        AND filled_spot < total_spots
+                        AND deleted_at IS NULL
+                    `, [matchId, contestTypeId])
+                ]);
+
+                const transformedContests = contests.map(contest => {
+                    const filledSpots = contest.total_spots > 500 || contest.is_bte === 1
+                        ? contest.filled_spot + (contest.fake_counter || 0)
+                        : contest.filled_spot;
+
+                    const transformed = {
+                        contestId: contest.id,
+                        contest_type_id: contest.contest_type,
+                        isCancelled: contest.is_cancelled === 1,
+                        maxAllowedTeam: contest.max_entries || 1,
+                        totalSpots: contest.total_spots,
+                        filled_spot: filledSpots,
+                        firstPrice: contest.first_prize,
+                        totalWinningPrize: contest.total_winning_prize,
+                        max_fees: contest.mrp,
+                        entryFees: contest.entry_fees,
+                        cancellation: contest.cancellation === "1",
+                        winnerPercentage: contest.winner_percentage,
+                        no_of_users_team: contest.user_joined_count,
+                        winnerCount: contest.prize_percentage,
+                        usable_bonus: contest.usable_bonus,
+                        bonus_contest: contest.bonus_contest,
+                        sort_by: contest.sort_by,
+                        extra_cash: contest.extra_cash,
+                        is_bte: contest.is_bte,
+                        is_flexible: contest.is_flexible,
+                        is_private: contest.is_private,
+                        is_gadget_based: contest.is_gadget_based
+                    };
+
+                    if (contest.is_bte === 1 && contest.expert_image) {
+                        transformed.expert_image = contest.expert_image;
+                    }
+
+                    return transformed;
+                });
+
+                const totalPages = Math.ceil((countResult?.total || 0) / perPage);
+
+                const result = {
+                    session_expired: false,
+                    system_time: currentTime,
+                    match_status: match.status_str,
+                    match_time: match.timestamp_start,
+                    status: true,
+                    code: 200,
+                    message: 'Success',
+                    response: {
+                        contestTypeDetails: contestType,
+                        matchcontests: transformedContests
+                    },
+                    pagination: {
+                        current_page: page,
+                        total_pages: totalPages
+                    },
+                    _meta: {
+                        processing_time_ms: Date.now() - startTime
+                    }
+                };
+
+                logger.info('Contest by type fetched', {
+                    matchId,
+                    contestTypeId,
+                    userId,
+                    contestCount: transformedContests.length,
+                    duration: Date.now() - startTime
+                });
+
+                return result;
+            },
+            CACHE_EXPIRY.ONE_MINUTE
+        );
+    } catch (error) {
+        logError(error, { context: 'getContestsByType', matchId, contestTypeId, userId });
+
+        return {
+            system_time: Math.floor(Date.now() / 1000),
+            status: false,
+            code: 500,
+            message: 'Failed to fetch contests by type',
+            _meta: {
+                processing_time_ms: Date.now() - startTime,
+                error: true
+            }
+        };
+    }
+};
+
 module.exports = {
     getContestsByMatch,
     getAllContestsByMatch,
     getMyContests,
     getJoinContestStatus,
     joinContest,
+    getContestsByType,
 };

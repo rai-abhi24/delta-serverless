@@ -247,3 +247,23 @@ exports.getJoinContestSchema = {
         }
     }
 };
+
+exports.getContestByTypeSchema = {
+    schema: {
+        querystring: {
+            type: 'object',
+            properties: {
+                page: { type: 'number' }
+            }
+        },
+        body: {
+            type: 'object',
+            required: ['match_id', 'contest_type_id'],
+            properties: {
+                match_id: { type: 'string' },
+                contest_type_id: { type: ['string', 'number'] }
+            },
+            additionalProperties: false
+        }
+    }
+};
