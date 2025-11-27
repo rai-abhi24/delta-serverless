@@ -272,7 +272,7 @@ const getPaginatedLeaderboard = async (matchId, contestId, userId, page, perPage
                 jc.user_id,
                 jc.team_count AS team,
                 jc.points AS point,
-                jc.ranks AS rank,
+                jc.ranks AS 'rank',
                 jc.winning_amount,
                 jc.team_name,
                 jc.user_name,
@@ -287,12 +287,10 @@ const getPaginatedLeaderboard = async (matchId, contestId, userId, page, perPage
             AND jc.contest_id = ?
             AND jc.user_id != ?
             ORDER BY jc.ranks ASC
-            LIMIT ? OFFSET ?
+            LIMIT ${perPage} OFFSET ${offset}
         `;
 
-        const teams = await queryAll(query, [
-            matchId, contestId, userId, perPage, offset
-        ]);
+        const teams = await queryAll(query, [matchId, contestId, userId]);
 
         return teams.map(t => transform(t));
     } catch (error) {

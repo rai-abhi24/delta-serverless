@@ -1244,7 +1244,6 @@ const validateJoinRequest = async (userId, matchId, contestId, teamIds) => {
 
         const placeholders = teamIds.map(_ => '?').join(',');
         const teamsQuery = `SELECT id, match_id, team_count FROM ${TABLES.CREATE_TEAMS} WHERE id IN (${placeholders}) AND user_id = ?`;
-        console.log(teamsQuery, teamIds);
 
         const teamsParams = [...teamIds, userId];
         const teams = await queryAll(teamsQuery, teamsParams);
@@ -1264,17 +1263,6 @@ const validateJoinRequest = async (userId, matchId, contestId, teamIds) => {
             return { valid: false, error: { status: false, code: 201, message: 'Contest is already full' } };
         }
 
-        // wallet summary for pre-check - but note: this is only indicative; actual deductions validated inside txn
-        // Sum wallet rows by payment_type
-        const walletSummary = await queryAll(`
-            SELECT payment_type, SUM(amount) AS amount_sum
-            FROM ${TABLES.WALLETS}
-            WHERE user_id = ? AND payment_type IN (3, 4)
-        `, [userId]);
-
-        const walletMap = {};
-        walletSummary.forEach(r => walletMap[r.payment_type] = Number(r.amount_sum || 0));
-
         return {
             valid: true,
             data: {
@@ -1282,7 +1270,6 @@ const validateJoinRequest = async (userId, matchId, contestId, teamIds) => {
                 match,
                 contest,
                 teams,
-                walletMap,
                 existingJoinCount: existingJoinsRow?.count || 0
             }
         };
@@ -1408,7 +1395,7 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
 const insertJoinRecord = async (connection, payload) => {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-    await connection.execute(`
+    return await connection.execute(`
         INSERT INTO ${TABLES.JOIN_CONTESTS}
         (user_id, match_id, contest_id, created_team_id, team_count, user_name, team_name,
         entry_fees, entryfee_bonus, entryfee_deposit, entryfee_winning, entryfee_extracash,
@@ -1444,6 +1431,7 @@ const doInvalidateCache = async (userId, matchId) => {
             cache.del(CACHE_KEYS.MY_CONTESTS(matchId, userId)),
             cache.del(CACHE_KEYS.CONTEST_FEED(matchId, 1)),
             cache.del(CACHE_KEYS.CONTEST_CATALOG(matchId)),
+            cache.del(CACHE_KEYS.WALLET_BALANCES(userId)),
         ]);
     } catch (err) {
         logError(err, { context: 'doInvalidateCache' });
@@ -1595,7 +1583,7 @@ const joinContest = async (userId, matchId, contestId, teamIds) => {
                 // insert
                 logger.info({ traceId, step: "INSERT_JOIN", teamId }, "Inserting join record");
 
-                await insertJoinRecord(connection, {
+                const [inserted] = await insertJoinRecord(connection, {
                     userId,
                     matchId,
                     contestId,
@@ -1612,12 +1600,18 @@ const joinContest = async (userId, matchId, contestId, teamIds) => {
                     is_bte: contest.is_bte || 0
                 });
 
-                logger.info({ traceId, step: "JOIN_INSERTED", teamId }, "Team join record inserted");
+                logger.info({ traceId, step: "JOIN_INSERTED", inserted }, "Team join record inserted");
 
                 // update team join status
                 await connection.execute(
                     `UPDATE ${TABLES.CREATE_TEAMS} SET team_join_status = 1 WHERE id = ?`,
                     [teamId]
+                );
+
+                // update filled_spot
+                await connection.execute(
+                    `UPDATE ${TABLES.CREATE_CONTESTS} SET filled_spot = filled_spot + 1 WHERE id = ?`,
+                    [contestId]
                 );
 
                 logger.info({ traceId, step: "TEAM_STATUS_UPDATED", teamId }, "Team join status updated");

@@ -97,7 +97,7 @@ exports.getStoriesHandler = async (_request, reply) => {
     try {
         const stories = await basicService.getStories();
 
-        return success(reply, stories);
+        return reply.code(200).send(stories);
     } catch (err) {
         logger.error({
             error: err.message,
@@ -115,7 +115,7 @@ exports.getRecentWinnersHandler = async (_request, reply) => {
     try {
         const result = await basicService.getRecentWinners();
 
-        return success(reply, result);
+        return reply.code(200).send(result);
     } catch (err) {
         logger.error({
             error: err.message,

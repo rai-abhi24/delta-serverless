@@ -473,7 +473,7 @@ const getMatchesWithStats = async (userId, matchIds, actionType, page = 1, limit
             
             WHERE m.match_id IN (${matchIdsStr})
             ${whereClause}
-            
+            GROUP BY m.match_id
             ORDER BY ${actionType === 'upcoming' ? 'm.created_at DESC' : actionType === 'live' ? 'm.updated_at DESC' : 'm.timestamp_start DESC'}
             LIMIT ${limit} OFFSET ${offset}
         `;
@@ -539,6 +539,17 @@ const transformMatchHistory = (match, actionType) => {
             timeZone: 'Asia/Kolkata'
         });
 
+    const dateEnd = new Date(match.date_end)
+        .toLocaleString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'Asia/Kolkata'
+        });
+
     return {
         match_id: match.match_id,
         title: match.title,
@@ -548,7 +559,7 @@ const transformMatchHistory = (match, actionType) => {
         timestamp_start: match.timestamp_start,
         timestamp_end: match.timestamp_end,
         date_start: dateStart,
-        date_end: match.date_end,
+        date_end: dateEnd,
         game_state: match.game_state,
         game_state_str: match.game_state_str,
         competition_id: match.competition_id,
@@ -570,7 +581,7 @@ const transformMatchHistory = (match, actionType) => {
 
         // Prize (only for completed/live)
         ...(actionType !== 'upcoming' && {
-            prize_amount: parseFloat(match.prize_amount || 0).toFixed(2)
+            prize_amount: match.prize_amount || 0
         }),
 
         // Teams
@@ -618,7 +629,7 @@ const getMatchHistory = async (userId, actionType, page = 1) => {
         }
 
         const cacheKey = CACHE_KEYS.MATCH_HISTORY(userId, actionType, page);
-        logger.info(`getMatchHistory: cacheKey=${cacheKey}`);
+
         return await cache.cacheAside(
             cacheKey,
             async () => {

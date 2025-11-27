@@ -110,7 +110,7 @@ module.exports = {
         MATCH_SQUAD: (matchId) => `meta:squad:${matchId}`,
         PLAYER_IMAGE: (playerId) => `img:{playerImg}:${playerId}`,
         PRIZE_BREAKUP: (matchId, contestId) => `pbr:${matchId}:${contestId}`,
-        LEADERBOARD: (matchId, contestId, userId, page) => `leaderboard:${matchId}:${contestId}:${userId}:${page}`,
+        LEADERBOARD: (matchId, contestId, page) => `leaderboard:${matchId}:${contestId}:${page}`,
 
         PLAYERS: (matchId) => `plyr:${matchId}`,
         LINEUP_STATUS: (matchId) => `lineup:${matchId}`,

@@ -13,6 +13,10 @@ const config = require('../config');
  */
 const authenticate = async (request, reply) => {
     try {
+        if (config.isDevelopment && request.method === 'GET') {
+            return;
+        }
+
         if (config.isDevelopment) {
             request.user = { id: request.body.user_id };
             return;

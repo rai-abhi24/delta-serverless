@@ -83,7 +83,7 @@ const getPrizeBreakupData = async (contest) => {
         // Priority 3: Flexible/Private contest custom breakup
         if ((contest.is_flexible === 1 || contest.is_private === 1) && contest.prize_breakup) {
             try {
-                const customBreakup = JSON.parse(contest.prize_breakup);
+                const customBreakup = contest.prize_breakup;
                 if (Array.isArray(customBreakup) && customBreakup.length > 0) {
                     return customBreakup;
                 }
