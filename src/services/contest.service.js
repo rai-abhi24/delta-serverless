@@ -342,10 +342,10 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
     const startTime = Date.now();
 
     try {
-        const feedCacheKey = CACHE_KEYS.CONTEST_FEED(matchId, page);
+        const feedCacheKey = CACHE_KEYS.CONTEST_FEED(matchId, userId, page);
         const cached = await cache.get(feedCacheKey);
         if (cached) {
-            logger.info('Contest feed served from cache', { matchId, userId, page });
+            logger.info({ matchId, userId, page }, 'Contest feed served from cache');
             return cached;
         }
 
@@ -381,13 +381,6 @@ const getContestsByMatch = async (matchId, userId, page = 1) => {
             getUserTeamCount(matchId, userId),
             getUserJoinedContestCount(matchId, userId)
         ]);
-
-        logger.info(`Contest feed generated ${JSON.stringify({
-            contests,
-            userJoinedData,
-            userTeamCount,
-            userContestCount
-        })}`);
 
         const groupedContests = groupContestsByType(contests, userJoinedData, userId);
         const contestsPerPage = 10;
@@ -1305,7 +1298,7 @@ const calculatePerTeamCost = (entryFee, usableBonusPercent, extraCashPercent, is
 /**
  * DEDUCT FROM WALLETS (atomic, within transaction)
  */
-const deductForSingleTeam = async (connection, walletRows, cost) => {
+const deductForSingleTeam = async (connection, walletRows, cost, meta) => {
     // Build map and in-memory amounts
     const walletMap = {};
     walletRows.forEach(r => walletMap[r.payment_type] = { id: r.id, amount: Number(r.amount || 0) });
@@ -1313,6 +1306,8 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
     // Track deductions
     let rem = Number(cost.totalCost || 0);
     const ded = { bonus: 0, extraCash: 0, deposit: 0, prize: 0 };
+
+    const transactionId = `${meta.match_id}S${meta.contest_id}F${meta.user_id}`;
 
     // Bonus first (type 1)
     if (cost.bonus > 0 && walletMap[1]?.amount > 0) {
@@ -1322,7 +1317,7 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
                 INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
                 (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-            `, [walletRows[0]?.user_id, take, 1, 'EntryFee-Bonus', null, '-', 'success']); // transaction_id null here - you can populate
+            `, [meta.user_id, take, 6, 'Join Contest', transactionId, '-', 'success']); // transaction_id null here - you can populate
             await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[1].id]);
             walletMap[1].amount -= take;
             rem = Number((rem - take).toFixed(2));
@@ -1338,7 +1333,7 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
                 INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
                 (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-            `, [walletRows[0]?.user_id || null, take, 9, 'EntryFee-ExtraCash', null, '-', 'success']);
+            `, [meta.user_id || null, take, 6, 'Join Contest', transactionId, '-', 'success']);
             await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[9].id]);
             walletMap[9].amount -= take;
             rem = Number((rem - take).toFixed(2));
@@ -1354,7 +1349,7 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
                 INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
                 (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-            `, [walletRows[0]?.user_id || null, take, 3, 'EntryFee-Deposit', null, '-', 'success']);
+            `, [meta.user_id || null, take, 6, 'Join Contest', transactionId, '-', 'success']);
             await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[3].id]);
             walletMap[3].amount -= take;
             rem = Number((rem - take).toFixed(2));
@@ -1370,7 +1365,7 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
                 INSERT INTO ${TABLES.WALLET_TRANSACTIONS}
                 (user_id, amount, payment_type, payment_type_string, transaction_id, debit_credit_status, payment_status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-            `, [walletRows[0]?.user_id || null, take, 4, 'EntryFee-Prize', null, '-', 'success']);
+            `, [meta.user_id || null, take, 6, 'Join Contest', transactionId, '-', 'success']);
             await connection.execute(`UPDATE ${TABLES.WALLETS} SET amount = amount - ? WHERE id = ?`, [take, walletMap[4].id]);
             walletMap[4].amount -= take;
             rem = Number((rem - take).toFixed(2));
@@ -1394,13 +1389,16 @@ const deductForSingleTeam = async (connection, walletRows, cost) => {
  */
 const insertJoinRecord = async (connection, payload) => {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const randomNum = Math.floor(Math.random() * 100);
+    const timestamp = Math.round(new Date().getTime() / 1000);
+    const transactionId = `${timestamp}${payload.matchId}${payload.contestId}${payload.userId}${randomNum}`;
 
     return await connection.execute(`
         INSERT INTO ${TABLES.JOIN_CONTESTS}
         (user_id, match_id, contest_id, created_team_id, team_count, user_name, team_name,
         entry_fees, entryfee_bonus, entryfee_deposit, entryfee_winning, entryfee_extracash,
-        customer_type, is_bte, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        customer_type, is_bte, transaction_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
         payload.userId,
         payload.matchId,
@@ -1416,6 +1414,7 @@ const insertJoinRecord = async (connection, payload) => {
         payload.entryfee_extracash,
         payload.customer_type,
         payload.is_bte ? 1 : 0,
+        transactionId,
         now,
         now
     ]);
@@ -1424,14 +1423,15 @@ const insertJoinRecord = async (connection, payload) => {
 /**
  * INVALIDATE CACHE (async, non-blocking)
  */
-const doInvalidateCache = async (userId, matchId) => {
+const doInvalidateCache = async (userId, matchId, contestId) => {
     try {
         await Promise.all([
             cache.del(CACHE_KEYS.USER_CONTESTS(matchId, userId)),
             cache.del(CACHE_KEYS.MY_CONTESTS(matchId, userId)),
-            cache.del(CACHE_KEYS.CONTEST_FEED(matchId, 1)),
+            cache.del(CACHE_KEYS.CONTEST_FEED(matchId, userId, 1)),
             cache.del(CACHE_KEYS.CONTEST_CATALOG(matchId)),
             cache.del(CACHE_KEYS.WALLET_BALANCES(userId)),
+            cache.del(CACHE_KEYS.LEADERBOARD(matchId, contestId, 1)),
         ]);
     } catch (err) {
         logError(err, { context: 'doInvalidateCache' });
@@ -1575,7 +1575,7 @@ const joinContest = async (userId, matchId, contestId, teamIds) => {
 
                 logger.info({ traceId, step: "DEDUCTING_FUNDS", teamId, perTeamCost }, "Deducting wallet funds");
 
-                const deductions = await deductForSingleTeam(connection, walletRows, perTeamCost);
+                const deductions = await deductForSingleTeam(connection, walletRows, perTeamCost, { matchId, contestId, userId });
 
                 logger.info({ traceId, step: "DEDUCTIONS_DONE", teamId, deductions }, "Wallet deduction completed");
 
@@ -1619,17 +1619,6 @@ const joinContest = async (userId, matchId, contestId, teamIds) => {
                 joined.push(teamId);
             }
 
-            // update contest filled_spot
-            if (joined.length > 0) {
-                logger.info({ traceId, step: "UPDATE_FILLED_SPOT", increment: joined.length }, "Updating filled_spot");
-
-                await connection.execute(`
-                    UPDATE ${TABLES.CREATE_CONTESTS}
-                    SET filled_spot = filled_spot + ?
-                    WHERE id = ?
-                `, [joined.length, contestId]);
-            }
-
             logger.info({ traceId, step: "TXN_COMPLETE", joined }, "Transaction complete");
 
             return { joinedTeams: joined, perTeamCost };
@@ -1638,7 +1627,7 @@ const joinContest = async (userId, matchId, contestId, teamIds) => {
         // post cache invalidation
         setImmediate(() => {
             logger.info({ traceId, step: "CACHE_INVALIDATE_START" }, "Invalidating cache...");
-            doInvalidateCache(userId, matchId).catch(err =>
+            doInvalidateCache(userId, matchId, contestId).catch(err =>
                 logError(err, { traceId, context: "postJoinInvalidate" })
             );
         });
